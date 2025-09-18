@@ -17,6 +17,14 @@
                 </svg>
                 Добавить материал
             </a>
+            <a href="{{ route('knowledge.import', [$organization, $bot]) }}" 
+               style="padding: 10px 20px; background: #6366f1; color: white; text-decoration: none; border-radius: 5px; display: inline-flex; align-items: center;">
+                📥 Импорт документов
+            </a>
+            <a href="{{ route('knowledge.sources.index', [$organization, $bot]) }}" 
+               style="padding: 10px 20px; background: #8b5cf6; color: white; text-decoration: none; border-radius: 5px; display: inline-flex; align-items: center;">
+                🔄 Источники
+            </a>
             <a href="{{ route('bots.show', [$organization, $bot]) }}" 
                style="padding: 10px 20px; background: #6b7280; color: white; text-decoration: none; border-radius: 5px;">
                 ← Назад к боту

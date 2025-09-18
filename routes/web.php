@@ -12,6 +12,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\KnowledgeSourceController;
 use Illuminate\Support\Facades\Route;
 
 // Публичные роуты

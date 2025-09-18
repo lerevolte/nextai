@@ -31,9 +31,11 @@ class KnowledgeSourceController extends Controller
 
         $sources = $knowledgeBase->sources()
             ->withCount('items')
-            ->with('syncLogs' => function ($query) {
-                $query->latest()->limit(1);
-            })
+            ->with([
+                'syncLogs' => function ($query) {
+                    $query->latest()->limit(1);
+                }
+            ])
             ->get();
 
         return view('knowledge.sources.index', compact('organization', 'bot', 'knowledgeBase', 'sources'));

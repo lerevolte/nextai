@@ -198,10 +198,21 @@
                 <div id="knowledge-content" class="tab-content hidden">
                     <div class="mb-4 flex justify-between items-center">
                         <h3 class="text-lg font-medium">База знаний</h3>
-                        <a href="{{ route('knowledge.create', [$organization, $bot]) }}" 
-                           class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
-                            Добавить материал
-                        </a>
+                        <div>
+                            <a href="{{ route('knowledge.create', [$organization, $bot]) }}" 
+                               class="mr-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+                                Добавить материал
+                            </a>
+                            <a href="{{ route('knowledge.import', [$organization, $bot]) }}" class="mr-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
+                               style="background: #6366f1; color: white;">
+                                📥 Импорт документов
+                            </a>
+                            <a href="{{ route('knowledge.sources.index', [$organization, $bot]) }}" 
+                            class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
+                               style="background: #8b5cf6; color: white;">
+                                🔄 Источники
+                            </a>
+                        </div>
                     </div>
                     @if($bot->knowledgeBase && $bot->knowledgeBase->items->count() > 0)
                         <div class="space-y-4">
