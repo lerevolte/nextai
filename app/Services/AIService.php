@@ -17,6 +17,13 @@ class AIService
         'deepseek' => DeepSeekProvider::class,
     ];
 
+    protected EmbeddingService $embeddingService;
+
+    public function __construct(EmbeddingService $embeddingService)
+    {
+        $this->embeddingService = $embeddingService;
+    }
+
     public function generateResponse(Bot $bot, Conversation $conversation, string $message): string
     {
         $provider = $this->getProvider($bot->ai_provider);
@@ -80,16 +87,49 @@ class AIService
 
     protected function getRelevantContext(Bot $bot, string $query): string
     {
-        // Здесь будет логика поиска релевантной информации из базы знаний
-        // Используем полнотекстовый поиск или векторный поиск
+        $knowledgeBase = $bot->knowledgeBase;
         
-        $items = $bot->knowledgeBase
-            ->items()
-            ->where('is_active', true)
-            ->whereRaw("MATCH(title, content) AGAINST(? IN NATURAL LANGUAGE MODE)", [$query])
-            ->limit(3)
-            ->get();
+        if (!$knowledgeBase) {
+            return '';
+        }
 
-        return $items->pluck('content')->implode("\n\n");
+        // Используем гибридный поиск
+        $results = $this->embeddingService->hybridSearch($query, $knowledgeBase, 3);
+
+        if (empty($results)) {
+            // Fallback на простой поиск если ничего не нашли
+            $items = $knowledgeBase->items()
+                ->where('is_active', true)
+                ->orderBy('created_at', 'desc')
+                ->limit(2)
+                ->get();
+                
+            $context = "Информация из базы знаний:\n\n";
+            foreach ($items as $item) {
+                $context .= "## " . $item->title . "\n";
+                $context .= $item->content . "\n\n";
+            }
+            
+            return $context;
+        }
+
+        // Формируем контекст из найденных документов
+        $context = "Релевантная информация из базы знаний:\n\n";
+        
+        foreach ($results as $result) {
+            $item = $result['item'];
+            $score = isset($result['score']) ? round($result['score'], 2) : 0;
+            
+            $context .= "## " . $item->title . "\n";
+            $context .= $item->content . "\n\n";
+            
+            Log::debug('Knowledge base item used', [
+                'item_id' => $item->id,
+                'title' => $item->title,
+                'relevance_score' => $score,
+            ]);
+        }
+
+        return $context;
     }
 }

@@ -102,12 +102,27 @@ class BotController extends Controller
             'temperature' => 'required|numeric|min:0|max:2',
             'max_tokens' => 'required|integer|min:50|max:4000',
             'is_active' => 'boolean',
-            'knowledge_base_enabled' => 'boolean',
+            'knowledge_base_enabled' => 'boolean', // Добавили
             'collect_contacts' => 'boolean',
             'human_handoff_enabled' => 'boolean',
         ]);
 
+        // Обработка checkbox - если не отмечен, значит false
+        $validated['knowledge_base_enabled'] = $request->has('knowledge_base_enabled');
+        $validated['is_active'] = $request->has('is_active');
+        $validated['collect_contacts'] = $request->has('collect_contacts');
+        $validated['human_handoff_enabled'] = $request->has('human_handoff_enabled');
+
         $bot->update($validated);
+
+        // Если включили базу знаний, создаем её если нет
+        if ($validated['knowledge_base_enabled'] && !$bot->knowledgeBase) {
+            $bot->knowledgeBase()->create([
+                'name' => 'База знаний ' . $bot->name,
+                'description' => 'Основная база знаний бота',
+                'is_active' => true,
+            ]);
+        }
 
         return redirect()
             ->route('bots.show', [$organization, $bot])

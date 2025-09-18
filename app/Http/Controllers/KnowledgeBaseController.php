@@ -9,6 +9,7 @@ use App\Models\KnowledgeItemVersion;
 use App\Models\Organization;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use App\Services\EmbeddingService;
 
 class KnowledgeBaseController extends Controller
 {
@@ -76,9 +77,20 @@ class KnowledgeBaseController extends Controller
             ],
         ]);
 
+        // Генерируем эмбеддинг в фоне
+        dispatch(function () use ($item) {
+            $embeddingService = app(EmbeddingService::class);
+            $text = $item->title . "\n\n" . $item->content;
+            $embedding = $embeddingService->generateEmbedding($text);
+            
+            if ($embedding) {
+                $item->update(['embedding' => json_encode($embedding)]);
+            }
+        })->afterResponse();
+
         return redirect()
             ->route('knowledge.index', [$organization, $bot])
-            ->with('success', 'Материал добавлен в базу знаний');
+            ->with('success', 'Материал добавлен в базу знаний. Эмбеддинг генерируется в фоне.');
     }
 
     public function edit(Organization $organization, Bot $bot, $itemId)

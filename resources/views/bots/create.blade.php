@@ -147,6 +147,68 @@
             </ul>
         </div>
 
+        <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bfdbfe;">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #1e40af;">
+                📚 База знаний
+            </h3>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; cursor: pointer; font-weight: 500;">
+                    <input type="checkbox" name="knowledge_base_enabled" value="1" 
+                           {{ old('knowledge_base_enabled', $bot->knowledge_base_enabled ?? false) ? 'checked' : '' }}
+                           onchange="toggleKnowledgeBaseInfo(this)"
+                           style="width: 20px; height: 20px; margin-right: 10px;">
+                    <span>Использовать базу знаний</span>
+                </label>
+                <small style="color: #6b7280; display: block; margin-top: 5px; margin-left: 30px;">
+                    Бот будет использовать информацию из базы знаний для более точных ответов
+                </small>
+            </div>
+
+            <div id="knowledge-base-info" style="display: {{ old('knowledge_base_enabled', $bot->knowledge_base_enabled ?? false) ? 'block' : 'none' }}; margin-top: 15px; padding: 15px; background: white; border-radius: 6px;">
+                @if(isset($bot) && $bot->knowledgeBase)
+                    <p style="margin-bottom: 10px;">
+                        <strong>Статус базы знаний:</strong>
+                        <span style="color: #10b981;">✓ Активна</span>
+                    </p>
+                    <p style="margin-bottom: 10px;">
+                        <strong>Материалов:</strong> {{ $bot->knowledgeBase->getItemsCount() }}
+                        (активных: {{ $bot->knowledgeBase->getActiveItemsCount() }})
+                    </p>
+                    <p style="margin-bottom: 15px;">
+                        <strong>Объем:</strong> {{ number_format($bot->knowledgeBase->getTotalCharacters()) }} символов
+                    </p>
+                    
+                    <a href="{{ route('knowledge.index', [$organization, $bot]) }}" 
+                       style="display: inline-block; padding: 8px 16px; background: #6366f1; color: white; text-decoration: none; border-radius: 5px; font-size: 14px;">
+                        Управление базой знаний →
+                    </a>
+                @else
+                    <p style="color: #6b7280;">
+                        После создания бота вы сможете добавить материалы в базу знаний
+                    </p>
+                @endif
+            </div>
+
+            <!-- <div style="margin-top: 15px; padding: 15px; background: #fef3c7; border-radius: 6px;">
+                <p style="margin: 0; color: #92400e; font-size: 14px;">
+                    <strong>⚠️ Важно:</strong> Для работы базы знаний с векторным поиском требуется API ключ OpenAI 
+                    (даже если бот использует другого провайдера). Эмбеддинги генерируются через модель text-embedding-ada-002.
+                </p>
+            </div> -->
+        </div>
+
+        <script>
+        function toggleKnowledgeBaseInfo(checkbox) {
+            const infoBlock = document.getElementById('knowledge-base-info');
+            if (checkbox.checked) {
+                infoBlock.style.display = 'block';
+            } else {
+                infoBlock.style.display = 'none';
+            }
+        }
+        </script>
+
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
             <a href="{{ route('bots.index', $organization) }}" 
                style="padding: 10px 20px; background: #f3f4f6; color: #111827; text-decoration: none; border-radius: 5px;">
