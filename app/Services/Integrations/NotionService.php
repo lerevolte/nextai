@@ -6,11 +6,12 @@ use Illuminate\Support\Facades\Log;
 use App\Models\KnowledgeSource;
 use App\Models\KnowledgeItem;
 use Notion\Databases\Database;
-use Notion\Databases\Query;
 use Notion\Notion;
 use Notion\Pages\Page;
 use Notion\Blocks\BlockInterface as Block;
+use Notion\Blocks\BlockType;
 use Notion\Common\RichText;
+use Notion\Pages\Properties\PropertyType;
 
 class NotionService
 {
@@ -46,7 +47,6 @@ class NotionService
         try {
             $processedIds = [];
             
-            // Метод query() ожидает объект Database, а не строку ID.
             // Сначала найдем базу данных по ее ID.
             $database = $this->client->databases()->find($config['database_id']);
             
@@ -60,8 +60,11 @@ class NotionService
 
                     $content = $this->extractPageContent($page);
                     $title = $page->title()?->toString() ?? 'Untitled';
+                    
+                    Log::info("Processing page: {$title} ({$externalId})");
 
                     if (empty($content)) {
+                        Log::warning("Content for page '{$title}' is empty. Skipping.");
                         continue;
                     }
 
@@ -77,6 +80,7 @@ class NotionService
 
                     if ($item) {
                         if ($this->hasContentChanged($item, $content)) {
+                            Log::info("Updating page: {$title}");
                             $this->saveVersion($item);
                             $item->update([
                                 'title' => $title,
@@ -89,6 +93,7 @@ class NotionService
                             $stats['updated']++;
                         }
                     } else {
+                        Log::info("Adding new page: {$title}");
                         $item = KnowledgeItem::create([
                             'knowledge_base_id' => $source->knowledge_base_id,
                             'knowledge_source_id' => $source->id,
@@ -136,8 +141,6 @@ class NotionService
 
     protected function extractPageContent(Page $page): string
     {
-        // В данной версии SDK метод findChildren не поддерживает пагинацию и вернет только первые 100 блоков.
-        // Для страниц с большим количеством блоков может потребоваться обновление SDK или ручная реализация запросов.
         $allBlocks = $this->client->blocks()->findChildren($page->id);
 
         $content = '';
@@ -150,40 +153,38 @@ class NotionService
 
     protected function parseBlock(Block $block): string
     {
-        // Большинство блоков имеют метод toString() для получения текстового содержимого.
-        switch ($block->metadata()->type) {
-            case 'paragraph':
-            case 'heading_1':
-            case 'heading_2':
-            case 'heading_3':
-            case 'bulleted_list_item':
-            case 'numbered_list_item':
-            case 'quote':
-                $text = $block->toString();
-                if ($block->metadata()->type === BlockType::Heading1) return "# " . $text;
-                if ($block->metadata()->type === BlockType::Heading2) return "## " . $text;
-                if ($block->metadata()->type === BlockType::Heading3) return "### " . $text;
-                if ($block->metadata()->type === BlockType::BulletedListItem) return "- " . $text;
-                if ($block->metadata()->type === BlockType::NumberedListItem) return "1. " . $text;
-                if ($block->metadata()->type === BlockType::Quote) return "> " . $text;
-                return $text;
-            case 'code':
+        switch ($block->metadata()->type->value) {
+            case BlockType::Paragraph->value:
+                return $block->toString();
+            case BlockType::Heading1->value:
+                return "# " . $block->toString();
+            case BlockType::Heading2->value:
+                return "## " . $block->toString();
+            case BlockType::Heading3->value:
+                return "### " . $block->toString();
+            case BlockType::BulletedListItem->value:
+                return "- " . $block->toString();
+            case BlockType::NumberedListItem->value:
+                return "1. " . $block->toString();
+            case BlockType::Quote->value:
+                return "> " . $block->toString();
+            case BlockType::Code->value:
                 return "```" . $block->language->value . "\n" . $block->toString() . "\n```";
-            case 'table':
+            case BlockType::Table->value:
                 return $this->parseTable($block);
             default:
+                Log::warning("Unsupported block type: " . $block->metadata()->type->value);
                 return '';
         }
     }
 
     protected function parseTable(Block $tableBlock): string
     {
-        // Метод findChildren вернет только первые 100 строк таблицы.
         $allRows = $this->client->blocks()->findChildren($tableBlock->metadata()->id);
 
         $markdown = '';
         foreach ($allRows as $index => $row) {
-            if ($row->metadata()->type === 'table_row') {
+            if ($row->metadata()->type->value === BlockType::TableRow->value) {
                 $cellsText = array_map(fn($cell) => RichText::multipleToString(...$cell), $row->cells);
                 $markdown .= '| ' . implode(' | ', $cellsText) . " |\n";
 
@@ -200,25 +201,28 @@ class NotionService
     {
         $properties = [];
         foreach ($page->properties as $name => $property) {
-            switch ($property->metadata()->type) {
-                case 'title':
-                case 'rich_text':
+            switch ($property->metadata()->type->value) {
+                case PropertyType::Title->value:
+                case PropertyType::RichText->value:
                     $properties[$name] = $property->toString();
                     break;
-                case 'select':
+                case PropertyType::Select->value:
                     $properties[$name] = $property->option?->name;
                     break;
-                case 'multi_select':
+                case PropertyType::MultiSelect->value:
                     $properties[$name] = array_map(fn($option) => $option->name, $property->options);
                     break;
-                case 'checkbox':
+                case PropertyType::Checkbox->value:
                     $properties[$name] = $property->checked;
                     break;
-                case 'number':
+                case PropertyType::Number->value:
                     $properties[$name] = $property->number;
                     break;
-                case 'date':
+                case PropertyType::Date->value:
                     $properties[$name] = $property->start()?->format('Y-m-d');
+                    break;
+                default:
+                    Log::warning("Unsupported property type: " . $property->metadata()->type->value);
                     break;
             }
         }

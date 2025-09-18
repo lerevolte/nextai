@@ -37,7 +37,6 @@ class WebhookController extends Controller
         }
 
         $this->telegramService->processWebhook($channel, $request->all());
-
         return response('ok', 200);
     }
 

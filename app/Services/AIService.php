@@ -9,6 +9,7 @@ use App\Services\Providers\GeminiProvider;
 use App\Services\Providers\DeepSeekProvider;
 use OpenAI\Laravel\Facades\OpenAI;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class AIService
 {

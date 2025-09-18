@@ -9,6 +9,7 @@ use App\Services\Messengers\TelegramService;
 use App\Services\Messengers\VKService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Log;
 
 class ChannelController extends Controller
 {
@@ -45,7 +46,7 @@ class ChannelController extends Controller
         $channel = $bot->channels()->create([
             'type' => $validated['type'],
             'name' => $validated['name'],
-            'credentials' => $credentials ? Crypt::encrypt($credentials) : null,
+            'credentials' => $credentials,
             'settings' => $request->settings ?? [],
             'is_active' => true,
         ]);
@@ -73,7 +74,7 @@ class ChannelController extends Controller
         // Если обновляются credentials
         if ($request->has('credentials')) {
             $credentials = $this->validateChannelCredentials($request);
-            $validated['credentials'] = Crypt::encrypt($credentials);
+            $validated['credentials'] = $credentials;
             
             // Переустанавливаем webhook при изменении credentials
             $this->setupWebhook($channel);
@@ -106,24 +107,27 @@ class ChannelController extends Controller
     {
         switch ($request->type) {
             case 'telegram':
-                return $request->validate([
+                $request->validate([
                     'credentials.bot_token' => 'required|string',
                     'credentials.secret_token' => 'required|string|min:16',
                 ]);
+                return $request->input('credentials');
 
             case 'whatsapp':
-                return $request->validate([
+                $request->validate([
                     'credentials.account_sid' => 'required|string',
                     'credentials.auth_token' => 'required|string',
                     'credentials.phone_number' => 'required|string',
                 ]);
+                return $request->input('credentials');
 
             case 'vk':
-                return $request->validate([
+                $request->validate([
                     'credentials.access_token' => 'required|string',
                     'credentials.confirmation_token' => 'required|string',
                     'credentials.secret_key' => 'required|string',
                 ]);
+                return $request->input('credentials');
 
             default:
                 return null;

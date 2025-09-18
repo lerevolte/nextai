@@ -37,7 +37,7 @@ Route::prefix('api/widget')->group(function () {
 
 // Вебхуки для мессенджеров
 Route::prefix('webhooks')->group(function () {
-    Route::post('/telegram/{channel}', [WebhookController::class, 'telegram']);
+    Route::post('/telegram/{channel}', [WebhookController::class, 'telegram'])->name('webhooks.telegram');
     Route::post('/whatsapp/{channel}', [WebhookController::class, 'whatsapp']);
     Route::post('/vk/{channel}', [WebhookController::class, 'vk']);
 });

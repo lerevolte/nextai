@@ -13,7 +13,7 @@ return new class extends Migration
             $table->foreignId('bot_id')->constrained()->onDelete('cascade');
             $table->string('type'); // web, telegram, whatsapp, instagram, vk, avito, bitrix24, amocrm
             $table->string('name');
-            $table->json('credentials')->nullable(); // Зашифрованные данные доступа
+            $table->text('credentials')->nullable();
             $table->json('settings')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamp('last_sync_at')->nullable();

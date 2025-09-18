@@ -190,9 +190,9 @@ class TelegramService
         $telegram = new Api($channel->credentials['bot_token']);
         
         $webhookUrl = route('webhooks.telegram', $channel);
-        
         $telegram->setWebhook([
             'url' => $webhookUrl,
+            'secret_token' => $channel->credentials['secret_token'],
             'allowed_updates' => ['message', 'callback_query'],
         ]);
         
