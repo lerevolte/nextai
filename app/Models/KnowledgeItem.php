@@ -96,4 +96,14 @@ class KnowledgeItem extends Model
     {
         $this->update(['embedding' => $embedding]);
     }
+
+    public function source(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeSource::class, 'knowledge_source_id');
+    }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(KnowledgeItemVersion::class);
+    }
 }

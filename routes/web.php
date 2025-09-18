@@ -92,8 +92,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::post('/conversations/{conversation}/takeover', [ConversationController::class, 'takeover'])->name('conversations.takeover');
                 Route::post('/conversations/{conversation}/close', [ConversationController::class, 'close'])->name('conversations.close');
             });
+            Route::prefix('bots/{bot}/knowledge')->middleware('bot.access')->group(function () {
+                Route::get('/sources', [KnowledgeSourceController::class, 'index'])->name('knowledge.sources.index');
+                Route::get('/sources/create', [KnowledgeSourceController::class, 'create'])->name('knowledge.sources.create');
+                Route::post('/sources', [KnowledgeSourceController::class, 'store'])->name('knowledge.sources.store');
+                Route::post('/sources/{source}/sync', [KnowledgeSourceController::class, 'sync'])->name('knowledge.sources.sync');
+                Route::delete('/sources/{source}', [KnowledgeSourceController::class, 'destroy'])->name('knowledge.sources.destroy');
+                Route::get('/import', [KnowledgeSourceController::class, 'import'])->name('knowledge.import');
+                Route::post('/import', [KnowledgeSourceController::class, 'processImport'])->name('knowledge.import.process');
+            });
         });
     });
+
+
 });
 
 // API роуты

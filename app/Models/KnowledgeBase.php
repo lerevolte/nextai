@@ -81,4 +81,10 @@ class KnowledgeBase extends Model
             ->limit($limit)
             ->get();
     }
+
+
+    public function sources(): HasMany
+    {
+        return $this->hasMany(KnowledgeSource::class);
+    }
 }
