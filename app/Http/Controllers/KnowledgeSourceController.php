@@ -224,4 +224,11 @@ class KnowledgeSourceController extends Controller
                 return now()->addDay();
         }
     }
+
+    public function logs(Organization $organization, Bot $bot, KnowledgeSource $source)
+    {
+        $logs = $source->syncLogs()->latest()->paginate(20);
+
+        return view('knowledge.sources.logs', compact('organization', 'bot', 'source', 'logs'));
+    }
 }

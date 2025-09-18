@@ -106,7 +106,8 @@
                                 🔄 Синхронизировать
                             </button>
                         </form>
-                        
+                        <a href="{{ route('knowledge.sources.logs', [$organization, $bot, $source]) }}"
+                                            class="text-gray-600 hover:text-gray-900 ml-4">Логи</a>
                         <form method="POST" action="{{ route('knowledge.sources.destroy', [$organization, $bot, $source]) }}" style="margin: 0;">
                             @csrf
                             @method('DELETE')

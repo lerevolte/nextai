@@ -226,3 +226,5 @@ class SyncKnowledgeSource implements ShouldQueue
         ]);
     }
 }
+
+

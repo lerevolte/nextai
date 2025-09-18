@@ -2,33 +2,26 @@
 
 namespace App\Services\Integrations;
 
-use Notion\Notion;
-use Notion\Pages\Page;
-use Notion\Databases\Database;
-use Notion\Blocks\BlockInterface;
 use Illuminate\Support\Facades\Log;
 use App\Models\KnowledgeSource;
 use App\Models\KnowledgeItem;
-use League\HTMLToMarkdown\HtmlConverter;
+use Notion\Databases\Database;
+use Notion\Databases\Query;
+use Notion\Notion;
+use Notion\Pages\Page;
+use Notion\Blocks\BlockInterface as Block;
+use Notion\Common\RichText;
 
 class NotionService
 {
-    protected $client;
-    protected HtmlConverter $htmlConverter;
-
-    public function __construct()
-    {
-        $this->htmlConverter = new HtmlConverter();
-    }
+    protected ?Notion $client = null;
 
     public function connect(array $config): bool
     {
         try {
             $this->client = Notion::create($config['api_token']);
-            
-            // Проверяем подключение
-            $this->client->users()->list();
-            
+            // Проверяем подключение, запрашивая информацию о текущем боте (токене)
+            $this->client->users()->me();
             return true;
         } catch (\Exception $e) {
             Log::error('Notion connection failed: ' . $e->getMessage());
@@ -39,8 +32,10 @@ class NotionService
     public function syncDatabase(KnowledgeSource $source): array
     {
         $config = $source->config;
-        $this->connect($config);
-        
+        if (!$this->connect($config)) {
+             throw new \Exception('Failed to connect to Notion.');
+        }
+
         $stats = [
             'added' => 0,
             'updated' => 0,
@@ -49,43 +44,40 @@ class NotionService
         ];
 
         try {
-            // Получаем страницы из базы данных Notion
-            $database = $this->client->databases()->find($config['database_id']);
-            $pages = $this->client->databases()->queryAllPages($database);
-
             $processedIds = [];
+            
+            // Метод query() ожидает объект Database, а не строку ID.
+            // Сначала найдем базу данных по ее ID.
+            $database = $this->client->databases()->find($config['database_id']);
+            
+            // Используем встроенный метод для получения всех страниц с пагинацией
+            $pages = $this->client->databases()->queryAllPages($database);
 
             foreach ($pages as $page) {
                 try {
-                    $externalId = $page->id();
+                    $externalId = $page->id;
                     $processedIds[] = $externalId;
 
-                    // Получаем контент страницы
                     $content = $this->extractPageContent($page);
-                    $title = $this->extractPageTitle($page);
-                    
+                    $title = $page->title()?->toString() ?? 'Untitled';
+
                     if (empty($content)) {
                         continue;
                     }
 
-                    // Проверяем существующий элемент
                     $item = KnowledgeItem::where('knowledge_source_id', $source->id)
                         ->where('external_id', $externalId)
                         ->first();
 
                     $metadata = [
-                        'notion_url' => $page->url(),
-                        'last_edited' => $page->lastEditedTime()->format('Y-m-d H:i:s'),
+                        'notion_url' => $page->url,
+                        'last_edited' => $page->lastEditedTime->format('Y-m-d H:i:s'),
                         'properties' => $this->extractProperties($page),
                     ];
 
                     if ($item) {
-                        // Проверяем изменения
                         if ($this->hasContentChanged($item, $content)) {
-                            // Сохраняем версию
                             $this->saveVersion($item);
-                            
-                            // Обновляем элемент
                             $item->update([
                                 'title' => $title,
                                 'content' => $content,
@@ -93,14 +85,10 @@ class NotionService
                                 'last_synced_at' => now(),
                                 'sync_metadata' => $metadata,
                             ]);
-                            
-                            // Генерируем новый эмбеддинг
                             $this->generateEmbedding($item);
-                            
                             $stats['updated']++;
                         }
                     } else {
-                        // Создаем новый элемент
                         $item = KnowledgeItem::create([
                             'knowledge_base_id' => $source->knowledge_base_id,
                             'knowledge_source_id' => $source->id,
@@ -108,35 +96,30 @@ class NotionService
                             'title' => $title,
                             'content' => $content,
                             'external_id' => $externalId,
-                            'source_url' => $page->url(),
+                            'source_url' => $page->url,
                             'is_active' => true,
                             'last_synced_at' => now(),
                             'sync_metadata' => $metadata,
                         ]);
-                        
-                        // Генерируем эмбеддинг
                         $this->generateEmbedding($item);
-                        
                         $stats['added']++;
                     }
                 } catch (\Exception $e) {
                     $stats['errors'][] = [
-                        'page_id' => $page->id(),
+                        'page_id' => $page->id ?? 'unknown',
                         'error' => $e->getMessage(),
                     ];
                     Log::error('Failed to sync Notion page', [
-                        'page_id' => $page->id(),
+                        'page_id' => $page->id ?? 'unknown',
                         'error' => $e->getMessage(),
                     ]);
                 }
             }
 
-            // Удаляем элементы, которых больше нет в Notion
             if ($config['delete_removed'] ?? false) {
                 $deletedCount = KnowledgeItem::where('knowledge_source_id', $source->id)
                     ->whereNotIn('external_id', $processedIds)
                     ->delete();
-                
                 $stats['deleted'] = $deletedCount;
             }
 
@@ -145,7 +128,6 @@ class NotionService
                 'source_id' => $source->id,
                 'error' => $e->getMessage(),
             ]);
-            
             throw $e;
         }
 
@@ -154,70 +136,59 @@ class NotionService
 
     protected function extractPageContent(Page $page): string
     {
-        $blocks = $this->client->blocks()->children($page->id());
-        $content = '';
+        // В данной версии SDK метод findChildren не поддерживает пагинацию и вернет только первые 100 блоков.
+        // Для страниц с большим количеством блоков может потребоваться обновление SDK или ручная реализация запросов.
+        $allBlocks = $this->client->blocks()->findChildren($page->id);
 
-        foreach ($blocks as $block) {
+        $content = '';
+        foreach ($allBlocks as $block) {
             $content .= $this->parseBlock($block) . "\n\n";
         }
 
         return trim($content);
     }
 
-    protected function parseBlock(BlockInterface $block): string
+    protected function parseBlock(Block $block): string
     {
-        $type = $block->type();
-        
-        switch ($type) {
+        // Большинство блоков имеют метод toString() для получения текстового содержимого.
+        switch ($block->metadata()->type) {
             case 'paragraph':
-                return $block->paragraph()->toText();
-                
             case 'heading_1':
-                return '# ' . $block->heading1()->toText();
-                
             case 'heading_2':
-                return '## ' . $block->heading2()->toText();
-                
             case 'heading_3':
-                return '### ' . $block->heading3()->toText();
-                
             case 'bulleted_list_item':
-                return '- ' . $block->bulletedListItem()->toText();
-                
             case 'numbered_list_item':
-                return '1. ' . $block->numberedListItem()->toText();
-                
-            case 'code':
-                $code = $block->code();
-                return "```" . $code->language() . "\n" . $code->toText() . "\n```";
-                
             case 'quote':
-                return '> ' . $block->quote()->toText();
-                
+                $text = $block->toString();
+                if ($block->metadata()->type === BlockType::Heading1) return "# " . $text;
+                if ($block->metadata()->type === BlockType::Heading2) return "## " . $text;
+                if ($block->metadata()->type === BlockType::Heading3) return "### " . $text;
+                if ($block->metadata()->type === BlockType::BulletedListItem) return "- " . $text;
+                if ($block->metadata()->type === BlockType::NumberedListItem) return "1. " . $text;
+                if ($block->metadata()->type === BlockType::Quote) return "> " . $text;
+                return $text;
+            case 'code':
+                return "```" . $block->language->value . "\n" . $block->toString() . "\n```";
             case 'table':
                 return $this->parseTable($block);
-                
             default:
                 return '';
         }
     }
 
-    protected function parseTable($tableBlock): string
+    protected function parseTable(Block $tableBlock): string
     {
-        // Парсинг таблиц Notion
-        $rows = $this->client->blocks()->children($tableBlock->id());
+        // Метод findChildren вернет только первые 100 строк таблицы.
+        $allRows = $this->client->blocks()->findChildren($tableBlock->metadata()->id);
+
         $markdown = '';
-        
-        foreach ($rows as $index => $row) {
-            if ($row->type() === 'table_row') {
-                $cells = $row->tableRow()->cells();
-                $markdown .= '| ' . implode(' | ', array_map(function($cell) {
-                    return $cell->toText();
-                }, $cells)) . " |\n";
-                
-                // Добавляем разделитель после заголовка
-                if ($index === 0) {
-                    $markdown .= '| ' . str_repeat('--- | ', count($cells)) . "\n";
+        foreach ($allRows as $index => $row) {
+            if ($row->metadata()->type === 'table_row') {
+                $cellsText = array_map(fn($cell) => RichText::multipleToString(...$cell), $row->cells);
+                $markdown .= '| ' . implode(' | ', $cellsText) . " |\n";
+
+                if ($index === 0 && $tableBlock->hasColumnHeader) {
+                    $markdown .= '| ' . str_repeat('--- | ', count($row->cells)) . "\n";
                 }
             }
         }
@@ -225,67 +196,38 @@ class NotionService
         return $markdown;
     }
 
-    protected function extractPageTitle(Page $page): string
-    {
-        $properties = $page->properties();
-        
-        // Ищем свойство title/name
-        foreach ($properties as $property) {
-            if ($property->type() === 'title') {
-                return $property->title()->toText();
-            }
-        }
-        
-        return 'Untitled';
-    }
-
     protected function extractProperties(Page $page): array
     {
         $properties = [];
-        
-        foreach ($page->properties() as $key => $property) {
-            $type = $property->type();
-            
-            switch ($type) {
+        foreach ($page->properties as $name => $property) {
+            switch ($property->metadata()->type) {
                 case 'title':
                 case 'rich_text':
-                    $properties[$key] = $property->toText();
+                    $properties[$name] = $property->toString();
                     break;
-                    
                 case 'select':
-                    $properties[$key] = $property->select()?->name();
+                    $properties[$name] = $property->option?->name;
                     break;
-                    
                 case 'multi_select':
-                    $properties[$key] = array_map(function($option) {
-                        return $option->name();
-                    }, $property->multiSelect() ?? []);
+                    $properties[$name] = array_map(fn($option) => $option->name, $property->options);
                     break;
-                    
                 case 'checkbox':
-                    $properties[$key] = $property->checkbox();
+                    $properties[$name] = $property->checked;
                     break;
-                    
                 case 'number':
-                    $properties[$key] = $property->number();
+                    $properties[$name] = $property->number;
                     break;
-                    
                 case 'date':
-                    $properties[$key] = $property->date()?->start()?->format('Y-m-d');
+                    $properties[$name] = $property->start()?->format('Y-m-d');
                     break;
             }
         }
-        
         return $properties;
     }
 
     protected function hasContentChanged(KnowledgeItem $item, string $newContent): bool
     {
-        // Сравниваем хеши контента
-        $oldHash = md5($item->content);
-        $newHash = md5($newContent);
-        
-        return $oldHash !== $newHash;
+        return md5($item->content) !== md5($newContent);
     }
 
     protected function saveVersion(KnowledgeItem $item): void
@@ -295,7 +237,7 @@ class NotionService
             'title' => $item->title,
             'content' => $item->content,
             'embedding' => $item->embedding,
-            'metadata' => $item->metadata,
+            'metadata' => $item->sync_metadata,
             'created_by' => auth()->id(),
             'change_notes' => 'Автоматическая синхронизация из Notion',
         ]);
@@ -314,3 +256,4 @@ class NotionService
         })->afterResponse();
     }
 }
+

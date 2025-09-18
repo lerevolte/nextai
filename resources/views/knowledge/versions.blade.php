@@ -64,9 +64,15 @@
                                 @endif
                             </div>
                             <button onclick="event.stopPropagation(); restoreVersion({{ $version->id }})" 
-                                    style="padding: 4px 8px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                    style="margin-right:5px;padding: 4px 8px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; font-size: 11px; cursor: pointer;">
                                 Восстановить
                             </button>
+                            @if($versions->count() > 1)
+                            <button onclick="event.stopPropagation(); deleteVersion({{ $version->id }})" 
+                                    style="padding: 4px 8px; background: #fee2e2; color: #991b1b; border: none; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                Удалить
+                            </button>
+                            @endif
                         </div>
                     </div>
                 @endforeach
@@ -182,17 +188,120 @@ function compareVersions() {
         return;
     }
     
-    // Здесь можно добавить AJAX запрос для получения diff
+    if (fromId === toId) {
+        alert('Выберите разные версии для сравнения');
+        return;
+    }
+    
     document.getElementById('diff-result').style.display = 'block';
     document.getElementById('diff-result').querySelector('div').innerHTML = 'Загрузка сравнения...';
     
-    // Имитация сравнения
-    setTimeout(() => {
-        document.getElementById('diff-result').querySelector('div').innerHTML = `
-            <div style="color: #dc2626;">- Удалено: старый текст</div>
-            <div style="color: #16a34a;">+ Добавлено: новый текст</div>
+    fetch('{{ route("knowledge.versions.compare", [$organization, $bot, $item->id]) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            from_id: fromId,
+            to_id: toId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let html = `
+            <div style="background: #f9fafb; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+                <strong>Сравнение:</strong> ${data.fromVersion} → ${data.toVersion}
+            </div>
         `;
-    }, 500);
+        
+        // Статистика изменений
+        if (data.stats) {
+            html += `
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
+                    <div style="background: white; padding: 10px; border-radius: 4px; border: 1px solid #e5e7eb;">
+                        <div style="font-size: 12px; color: #6b7280;">Строки</div>
+                        <div style="font-size: 14px; font-weight: 600;">
+                            <span style="color: #16a34a;">+${data.stats.lines.added}</span> / 
+                            <span style="color: #dc2626;">-${data.stats.lines.removed}</span>
+                        </div>
+                    </div>
+                    <div style="background: white; padding: 10px; border-radius: 4px; border: 1px solid #e5e7eb;">
+                        <div style="font-size: 12px; color: #6b7280;">Слова</div>
+                        <div style="font-size: 14px; font-weight: 600;">
+                            <span style="color: #16a34a;">+${data.stats.words.added}</span> / 
+                            <span style="color: #dc2626;">-${data.stats.words.removed}</span>
+                        </div>
+                    </div>
+                    <div style="background: white; padding: 10px; border-radius: 4px; border: 1px solid #e5e7eb;">
+                        <div style="font-size: 12px; color: #6b7280;">Символы</div>
+                        <div style="font-size: 14px; font-weight: 600;">
+                            <span style="color: #16a34a;">+${data.stats.chars.added}</span> / 
+                            <span style="color: #dc2626;">-${data.stats.chars.removed}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += '<h5 style="margin-bottom: 10px; font-weight: 600;">Изменения в заголовке:</h5>';
+        html += '<div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; line-height: 1.6;">' + data.titleDiff + '</div>';
+        
+        html += '<h5 style="margin-bottom: 10px; font-weight: 600;">Изменения в контенте:</h5>';
+        html += '<div style="background: white; padding: 15px; border-radius: 6px; max-height: 400px; overflow-y: auto; line-height: 1.6; white-space: pre-wrap;">' + data.contentDiff + '</div>';
+        
+        // Легенда
+        html += `
+            <div style="margin-top: 15px; padding: 10px; background: #f9fafb; border-radius: 6px; font-size: 12px;">
+                <strong>Легенда:</strong>
+                <span style="background: #dcfce7; color: #166534; padding: 2px 5px; margin: 0 5px;">Добавлено</span>
+                <span style="background: #fee2e2; color: #991b1b; text-decoration: line-through; padding: 2px 5px; margin: 0 5px;">Удалено</span>
+            </div>
+        `;
+        
+        document.getElementById('diff-result').querySelector('div').innerHTML = html;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('diff-result').querySelector('div').innerHTML = 
+            '<div style="color: #dc2626;">Ошибка при сравнении версий</div>';
+    });
+}
+
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function deleteVersion(versionId) {
+    if (!confirm('Удалить эту версию? Это действие необратимо.')) {
+        return;
+    }
+    
+    // Создаем форму для отправки DELETE запроса через POST
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `/o/{{ $organization->slug }}/bots/{{ $bot->id }}/knowledge/{{ $item->id }}/versions/${versionId}/delete`;
+    form.style.display = 'none';
+    
+    // CSRF токен
+    const csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = '_token';
+    csrfInput.value = '{{ csrf_token() }}';
+    form.appendChild(csrfInput);
+    
+    // Метод DELETE через _method
+    const methodInput = document.createElement('input');
+    methodInput.type = 'hidden';
+    methodInput.name = '_method';
+    methodInput.value = 'DELETE';
+    form.appendChild(methodInput);
+    
+    document.body.appendChild(form);
+    form.submit();
 }
 </script>
 @endsection

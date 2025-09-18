@@ -88,6 +88,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::delete('/knowledge/{item}', [KnowledgeBaseController::class, 'destroy'])->name('knowledge.destroy');
                 Route::get('/knowledge/{item}/versions', [KnowledgeBaseController::class, 'versions'])->name('knowledge.versions');
                 Route::post('/knowledge/{item}/restore-version', [KnowledgeBaseController::class, 'restoreVersion'])->name('knowledge.versions.restore');
+                Route::post('/knowledge/{item}/versions/compare', [KnowledgeBaseController::class, 'compareVersions'])->name('knowledge.versions.compare');
+                Route::delete('/knowledge/{item}/versions/{version}/delete', [KnowledgeBaseController::class, 'deleteVersion'])->name('knowledge.versions.delete');
                 // Диалоги
                 Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
                 Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
@@ -100,10 +102,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::post('/sources', [KnowledgeSourceController::class, 'store'])->name('knowledge.sources.store');
                 Route::post('/sources/{source}/sync', [KnowledgeSourceController::class, 'sync'])->name('knowledge.sources.sync');
                 Route::delete('/sources/{source}', [KnowledgeSourceController::class, 'destroy'])->name('knowledge.sources.destroy');
+                Route::get('/knowledge/sources/{source}/logs', [KnowledgeSourceController::class, 'logs'])->name('knowledge.sources.logs');
+
+
                 Route::get('/import', [KnowledgeSourceController::class, 'import'])->name('knowledge.import');
                 Route::post('/import', [KnowledgeSourceController::class, 'processImport'])->name('knowledge.import.process');
             });
-            
+
         });
     });
 
