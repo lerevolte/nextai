@@ -138,8 +138,8 @@
 
                 <div style="margin-bottom: 20px;">
                     <label style="font-size: 13px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Канал</label>
-                    <div style="margin-top: 5px; font-weight: 500; color: #111827;">
-                        {{ $conversation->channel->getIcon() }} {{ $conversation->channel->getTypeName() }}
+                    <div class="flex" style="margin-top: 5px; font-weight: 500; color: #111827;">
+                        {!! $conversation->channel->getIcon() !!} {{ $conversation->channel->getTypeName() }}
                     </div>
                 </div>
 
