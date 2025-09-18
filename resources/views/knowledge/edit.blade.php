@@ -91,6 +91,34 @@
             </small>
         </div>
 
+        <div style="margin-bottom: 25px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">
+                Заметки об изменениях <span style="color: #9ca3af;">(опционально)</span>
+            </label>
+            <input type="text" name="change_notes" 
+                   style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 15px;"
+                   placeholder="Например: Добавлена информация о доставке в регионы">
+            <small style="color: #6b7280; display: block; margin-top: 5px;">
+                Опишите, что изменилось в этой версии
+            </small>
+        </div>
+
+        <!-- Информация о версиях -->
+        <div style="background: #f0f9ff; padding: 15px; border-radius: 6px; margin-bottom: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong style="color: #1e40af;">Текущая версия: {{ $item->version }}</strong>
+                    <p style="color: #3b82f6; font-size: 14px; margin-top: 5px;">
+                        При сохранении будет создана версия {{ $item->version + 1 }}
+                    </p>
+                </div>
+                <a href="{{ route('knowledge.versions', [$organization, $bot, $item->id]) }}" 
+                   style="padding: 8px 16px; background: white; color: #1e40af; text-decoration: none; border-radius: 5px; border: 1px solid #93c5fd;">
+                    📜 История версий
+                </a>
+            </div>
+        </div>
+
         @if($item->metadata)
         <details style="margin-bottom: 25px;">
             <summary style="cursor: pointer; padding: 12px; background: #f9fafb; border-radius: 6px; font-size: 14px; color: #6b7280;">

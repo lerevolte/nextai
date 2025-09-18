@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bot;
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeItemVersion;
 use App\Models\Organization;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -100,6 +101,7 @@ class KnowledgeBaseController extends Controller
             'content' => 'required|string',
             'source_url' => 'nullable|url',
             'is_active' => 'boolean',
+            'change_notes' => 'nullable|string|max:500', // Добавляем поле для заметок
         ]);
 
         $knowledgeBase = $bot->knowledgeBase;
@@ -110,22 +112,22 @@ class KnowledgeBaseController extends Controller
 
         $item = $knowledgeBase->items()->findOrFail($itemId);
 
+        // Если есть заметки об изменениях, сохраняем их
+        if ($request->has('change_notes') && $request->change_notes) {
+            // Временно сохраняем заметки для Observer
+            $item->temp_change_notes = $request->change_notes;
+        }
+
         $item->update([
             'title' => $validated['title'],
             'content' => $validated['content'],
             'source_url' => $validated['source_url'] ?? $item->source_url,
             'is_active' => $request->has('is_active'),
-            'metadata' => array_merge($item->metadata ?? [], [
-                'updated_by' => auth()->id(),
-                'updated_at' => now(),
-                'char_count' => mb_strlen($validated['content']),
-                'word_count' => str_word_count($validated['content']),
-            ]),
         ]);
 
         return redirect()
             ->route('knowledge.index', [$organization, $bot])
-            ->with('success', 'Материал обновлен');
+            ->with('success', 'Материал обновлен. Версия ' . $item->version . ' сохранена.');
     }
 
     public function destroy(Organization $organization, Bot $bot, $itemId)
@@ -270,5 +272,64 @@ class KnowledgeBaseController extends Controller
         }
 
         return $chunks ?: [$content];
+    }
+
+    public function versions(Organization $organization, Bot $bot, $itemId)
+    {
+        $item = KnowledgeItem::findOrFail($itemId);
+        
+        if ($item->knowledge_base_id !== $bot->knowledgeBase->id) {
+            abort(403);
+        }
+        
+        $versions = $item->versions()
+            ->with('creator')
+            ->orderBy('version', 'desc')
+            ->get();
+        
+        return view('knowledge.versions', compact('organization', 'bot', 'item', 'versions'));
+    }
+
+    public function restoreVersion(Request $request, Organization $organization, Bot $bot, $itemId)
+    {
+        $item = KnowledgeItem::findOrFail($itemId);
+        
+        if ($item->knowledge_base_id !== $bot->knowledgeBase->id) {
+            abort(403);
+        }
+        
+        $version = KnowledgeItemVersion::findOrFail($request->version_id);
+        
+        if ($version->knowledge_item_id !== $item->id) {
+            abort(403);
+        }
+        
+        // Сохраняем текущую версию
+        $item->versions()->create([
+            'version' => $item->version,
+            'title' => $item->title,
+            'content' => $item->content,
+            'embedding' => $item->embedding,
+            'metadata' => $item->metadata,
+            'created_by' => auth()->id(),
+            'change_notes' => 'Сохранено перед восстановлением версии ' . $version->version,
+        ]);
+        
+        // Восстанавливаем выбранную версию
+        $item->update([
+            'title' => $version->title,
+            'content' => $version->content,
+            'embedding' => $version->embedding,
+            'metadata' => array_merge($version->metadata ?? [], [
+                'restored_from_version' => $version->version,
+                'restored_by' => auth()->id(),
+                'restored_at' => now(),
+            ]),
+            'version' => $item->version + 1,
+        ]);
+        
+        return redirect()
+            ->route('knowledge.versions', [$organization, $bot, $item->id])
+            ->with('success', 'Версия ' . $version->version . ' успешно восстановлена');
     }
 }

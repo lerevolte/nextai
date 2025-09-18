@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany; // Добавьте этот импорт
 
 class KnowledgeItem extends Model
 {
@@ -12,19 +13,26 @@ class KnowledgeItem extends Model
 
     protected $fillable = [
         'knowledge_base_id',
+        'knowledge_source_id',
         'type',
         'title',
         'content',
         'source_url',
+        'external_id',
+        'version',
         'metadata',
         'embedding',
         'is_active',
+        'last_synced_at',
+        'sync_metadata',
     ];
 
     protected $casts = [
         'metadata' => 'array',
         'embedding' => 'array',
+        'sync_metadata' => 'array',
         'is_active' => 'boolean',
+        'last_synced_at' => 'datetime',
     ];
 
     /**
@@ -33,6 +41,17 @@ class KnowledgeItem extends Model
     public function knowledgeBase(): BelongsTo
     {
         return $this->belongsTo(KnowledgeBase::class);
+    }
+
+    public function source(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeSource::class, 'knowledge_source_id');
+    }
+
+    // Исправленный метод versions с правильной типизацией
+    public function versions(): HasMany
+    {
+        return $this->hasMany(KnowledgeItemVersion::class);
     }
 
     /**
@@ -95,15 +114,5 @@ class KnowledgeItem extends Model
     public function updateEmbedding(array $embedding): void
     {
         $this->update(['embedding' => $embedding]);
-    }
-
-    public function source(): BelongsTo
-    {
-        return $this->belongsTo(KnowledgeSource::class, 'knowledge_source_id');
-    }
-
-    public function versions(): HasMany
-    {
-        return $this->hasMany(KnowledgeItemVersion::class);
     }
 }

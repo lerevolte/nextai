@@ -86,7 +86,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::get('/knowledge/{item}/edit', [KnowledgeBaseController::class, 'edit'])->name('knowledge.edit');
                 Route::put('/knowledge/{item}', [KnowledgeBaseController::class, 'update'])->name('knowledge.update');
                 Route::delete('/knowledge/{item}', [KnowledgeBaseController::class, 'destroy'])->name('knowledge.destroy');
-                
+                Route::get('/knowledge/{item}/versions', [KnowledgeBaseController::class, 'versions'])->name('knowledge.versions');
+                Route::post('/knowledge/{item}/restore-version', [KnowledgeBaseController::class, 'restoreVersion'])->name('knowledge.versions.restore');
                 // Диалоги
                 Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
                 Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
@@ -102,6 +103,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::get('/import', [KnowledgeSourceController::class, 'import'])->name('knowledge.import');
                 Route::post('/import', [KnowledgeSourceController::class, 'processImport'])->name('knowledge.import.process');
             });
+            
         });
     });
 
