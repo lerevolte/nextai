@@ -10,3 +10,12 @@ Artisan::command('inspire', function () {
 
 
 Schedule::command('knowledge:sync')->hourly();
+// Экспорт незавершенных диалогов в CRM каждые 30 минут
+Schedule::command('crm:sync export --limit=50')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping()
+    ->runInBackground();
+// Статистика CRM синхронизации раз в день
+Schedule::command('crm:sync stats')
+    ->dailyAt('09:00')
+    ->emailOutputTo(config('mail.admin_email'));

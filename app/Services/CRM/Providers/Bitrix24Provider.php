@@ -902,6 +902,649 @@ class Bitrix24Provider implements CrmProviderInterface
      */
     protected function syncMessages(Conversation $conversation): void
     {
+        try {
+            // Проверяем, есть ли чат в открытых линиях
+            $chatId = $conversation->metadata['bitrix24_chat_id'] ?? null;
+            
+            if (!$chatId) {
+                // Создаем чат если его нет
+                $chat = $this->createOpenLineChat($conversation);
+                $chatId = $chat['CHAT_ID'] ?? null;
+            }
+            
+            if (!$chatId) {
+                Log::warning('Unable to sync messages - no chat ID', [
+                    'conversation_id' => $conversation->id
+                ]);
+                return;
+            }
+            
+            // Получаем последние несинхронизированные сообщения
+            $lastSyncedMessageId = $conversation->metadata['last_synced_message_id'] ?? 0;
+            
+            $messages = $conversation->messages()
+                ->where('id', '>', $lastSyncedMessageId)
+                ->orderBy('created_at', 'asc')
+                ->get();
+            
+            foreach ($messages as $message) {
+                try {
+                    // Определяем автора сообщения
+                    $author = match($message->role) {
+                        'user' => 'USER',
+                        'assistant' => 'BOT',
+                        'operator' => 'OPERATOR',
+                        default => 'SYSTEM'
+                    };
+                    
+                    // Отправляем сообщение в открытую линию
+                    $messageData = [
+                        'CHAT_ID' => $chatId,
+                        'MESSAGE' => $message->content,
+                        'AUTHOR' => $author,
+                    ];
+                    
+                    // Если есть вложения
+                    if ($message->attachments) {
+                        $messageData['FILES'] = $this->prepareAttachments($message->attachments);
+                    }
+                    
+                    $response = $this->makeRequest('imopenlines.message.add', $messageData);
+                    
+                    // Обновляем ID последнего синхронизированного сообщения
+                    $conversation->update([
+                        'metadata' => array_merge($conversation->metadata ?? [], [
+                            'last_synced_message_id' => $message->id,
+                            'last_sync_at' => now()->toIso8601String(),
+                        ])
+                    ]);
+                    
+                } catch (\Exception $e) {
+                    Log::error('Failed to sync message to Bitrix24', [
+                        'message_id' => $message->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Messages sync failed', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Подготовка вложений для отправки
+     */
+    protected function prepareAttachments(array $attachments): array
+    {
+        $files = [];
         
+        foreach ($attachments as $attachment) {
+            if (isset($attachment['url'])) {
+                $files[] = [
+                    'NAME' => $attachment['name'] ?? 'file',
+                    'LINK' => $attachment['url'],
+                ];
+            } elseif (isset($attachment['base64'])) {
+                $files[] = [
+                    'NAME' => $attachment['name'] ?? 'file',
+                    'CONTENT' => $attachment['base64'],
+                ];
+            }
+        }
+        
+        return $files;
+    }
+    
+    /**
+     * Получение или создание пользователя открытой линии
+     */
+    protected function getOrCreateOpenLineUser(Conversation $conversation): int
+    {
+        try {
+            // Ищем существующего пользователя
+            if ($conversation->user_email) {
+                $response = $this->makeRequest('user.search', [
+                    'FILTER' => ['EMAIL' => $conversation->user_email],
+                ]);
+                
+                if (!empty($response['result'][0]['ID'])) {
+                    return $response['result'][0]['ID'];
+                }
+            }
+            
+            // Создаем нового пользователя открытой линии
+            $userData = [
+                'NAME' => $conversation->user_name ?? 'Гость',
+                'EMAIL' => $conversation->user_email,
+                'PHONE' => $conversation->user_phone,
+                'EXTERNAL_AUTH_ID' => 'chatbot',
+            ];
+            
+            $response = $this->makeRequest('user.add', $userData);
+            
+            return $response['result'] ?? 0;
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to get/create open line user', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage()
+            ]);
+            return 0;
+        }
+    }
+    
+    /**
+     * Обработка обновления лида
+     */
+    protected function handleLeadUpdate(array $data): void
+    {
+        try {
+            $leadId = $data['FIELDS']['ID'] ?? null;
+            if (!$leadId) return;
+            
+            // Находим связанную сущность
+            $syncEntity = $this->integration->getSyncEntity('lead', $leadId);
+            if (!$syncEntity) return;
+            
+            // Получаем полную информацию о лиде
+            $lead = $this->getEntity('lead', $leadId);
+            if (!$lead) return;
+            
+            // Обновляем кэшированные данные
+            $syncEntity->update([
+                'remote_data' => $lead,
+                'last_synced_at' => now(),
+            ]);
+            
+            // Если лид конвертирован в сделку
+            if ($lead['STATUS_ID'] === 'CONVERTED') {
+                $conversation = Conversation::find($syncEntity->local_id);
+                if ($conversation && !empty($lead['ASSOCIATED_ENTITY']['DEAL'][0])) {
+                    $dealId = $lead['ASSOCIATED_ENTITY']['DEAL'][0];
+                    $conversation->update(['crm_deal_id' => $dealId]);
+                    
+                    // Создаем связь для сделки
+                    $this->integration->createSyncEntity(
+                        'deal',
+                        $conversation->id,
+                        $dealId,
+                        []
+                    );
+                }
+            }
+            
+            Log::info('Lead updated from webhook', [
+                'lead_id' => $leadId,
+                'status' => $lead['STATUS_ID'] ?? null,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle lead update', [
+                'data' => $data,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Обработка обновления сделки
+     */
+    protected function handleDealUpdate(array $data): void
+    {
+        try {
+            $dealId = $data['FIELDS']['ID'] ?? null;
+            if (!$dealId) return;
+            
+            // Находим связанную сущность
+            $syncEntity = $this->integration->getSyncEntity('deal', $dealId);
+            if (!$syncEntity) return;
+            
+            // Получаем информацию о сделке
+            $deal = $this->getEntity('deal', $dealId);
+            if (!$deal) return;
+            
+            // Обновляем кэш
+            $syncEntity->update([
+                'remote_data' => $deal,
+                'last_synced_at' => now(),
+            ]);
+            
+            // Проверяем изменение стадии
+            $oldStageId = $syncEntity->remote_data['STAGE_ID'] ?? null;
+            $newStageId = $deal['STAGE_ID'] ?? null;
+            
+            if ($oldStageId !== $newStageId) {
+                // Логируем изменение стадии
+                Log::info('Deal stage changed', [
+                    'deal_id' => $dealId,
+                    'old_stage' => $oldStageId,
+                    'new_stage' => $newStageId,
+                ]);
+                
+                // Если сделка закрыта успешно
+                if (in_array($newStageId, ['WON', 'C2:WON'])) {
+                    $conversation = Conversation::find($syncEntity->local_id);
+                    if ($conversation && $conversation->isActive()) {
+                        $conversation->close();
+                        $conversation->messages()->create([
+                            'role' => 'system',
+                            'content' => 'Сделка в CRM успешно закрыта. Диалог завершен.',
+                        ]);
+                    }
+                }
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle deal update', [
+                'data' => $data,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Обработка обновления контакта
+     */
+    protected function handleContactUpdate(array $data): void
+    {
+        try {
+            $contactId = $data['FIELDS']['ID'] ?? null;
+            if (!$contactId) return;
+            
+            // Находим все связанные диалоги
+            $conversations = Conversation::where('crm_contact_id', $contactId)->get();
+            
+            if ($conversations->isEmpty()) return;
+            
+            // Получаем обновленную информацию о контакте
+            $contact = $this->getEntity('contact', $contactId);
+            if (!$contact) return;
+            
+            // Обновляем информацию в диалогах
+            foreach ($conversations as $conversation) {
+                $updates = [];
+                
+                if (!empty($contact['NAME'])) {
+                    $updates['user_name'] = $contact['NAME'];
+                }
+                
+                if (!empty($contact['EMAIL'][0]['VALUE'])) {
+                    $updates['user_email'] = $contact['EMAIL'][0]['VALUE'];
+                }
+                
+                if (!empty($contact['PHONE'][0]['VALUE'])) {
+                    $updates['user_phone'] = $contact['PHONE'][0]['VALUE'];
+                }
+                
+                if (!empty($updates)) {
+                    $conversation->update($updates);
+                }
+            }
+            
+            Log::info('Contact updated from webhook', [
+                'contact_id' => $contactId,
+                'affected_conversations' => $conversations->count(),
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle contact update', [
+                'data' => $data,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Обработка сообщения из открытой линии
+     */
+    protected function handleOpenLineMessage(array $data): void
+    {
+        try {
+            $chatId = $data['CHAT']['ID'] ?? null;
+            $message = $data['MESSAGE'] ?? [];
+            
+            if (!$chatId || empty($message)) return;
+            
+            // Находим диалог по ID чата
+            $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)->first();
+            
+            if (!$conversation) {
+                Log::warning('Conversation not found for open line message', [
+                    'chat_id' => $chatId
+                ]);
+                return;
+            }
+            
+            // Определяем роль отправителя
+            $authorType = $data['AUTHOR']['TYPE'] ?? 'USER';
+            $role = match($authorType) {
+                'USER', 'GUEST' => 'user',
+                'OPERATOR' => 'operator',
+                'BOT' => 'assistant',
+                default => 'system'
+            };
+            
+            // Проверяем, не наше ли это сообщение (чтобы избежать дублирования)
+            $lastMessage = $conversation->messages()->latest()->first();
+            if ($lastMessage && 
+                $lastMessage->content === $message['TEXT'] && 
+                $lastMessage->created_at->diffInSeconds(now()) < 5) {
+                return; // Пропускаем дублированное сообщение
+            }
+            
+            // Сохраняем сообщение
+            $newMessage = $conversation->messages()->create([
+                'role' => $role,
+                'content' => $message['TEXT'] ?? '',
+                'metadata' => [
+                    'bitrix24_message_id' => $message['ID'] ?? null,
+                    'author_id' => $data['AUTHOR']['ID'] ?? null,
+                    'author_name' => $data['AUTHOR']['NAME'] ?? null,
+                ],
+            ]);
+            
+            // Обновляем счетчики
+            $conversation->increment('messages_count');
+            $conversation->update(['last_message_at' => now()]);
+            
+            // Если сообщение от пользователя и бот активен, генерируем ответ
+            if ($role === 'user' && $conversation->bot->is_active && $conversation->status === 'active') {
+                dispatch(function () use ($conversation, $message) {
+                    $aiService = app(\App\Services\AIService::class);
+                    $response = $aiService->generateResponse(
+                        $conversation->bot,
+                        $conversation,
+                        $message['TEXT']
+                    );
+                    
+                    // Отправляем ответ обратно в открытую линию
+                    $this->sendOpenLineMessage($conversation, $response, 'bot');
+                })->afterResponse();
+            }
+            
+            Log::info('Open line message processed', [
+                'conversation_id' => $conversation->id,
+                'message_id' => $newMessage->id,
+                'role' => $role,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle open line message', [
+                'data' => $data,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Обработка подключения оператора к открытой линии
+     */
+    protected function handleOpenLineOperatorJoin(array $data): void
+    {
+        try {
+            $chatId = $data['CHAT']['ID'] ?? null;
+            $operatorId = $data['USER']['ID'] ?? null;
+            $operatorName = $data['USER']['NAME'] ?? 'Оператор';
+            
+            if (!$chatId) return;
+            
+            // Находим диалог
+            $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)->first();
+            
+            if (!$conversation) return;
+            
+            // Обновляем статус диалога
+            $conversation->update([
+                'status' => 'waiting_operator',
+                'metadata' => array_merge($conversation->metadata ?? [], [
+                    'bitrix24_operator_id' => $operatorId,
+                    'bitrix24_operator_name' => $operatorName,
+                    'operator_joined_at' => now()->toIso8601String(),
+                ])
+            ]);
+            
+            // Добавляем системное сообщение
+            $conversation->messages()->create([
+                'role' => 'system',
+                'content' => "Оператор {$operatorName} подключился к диалогу",
+                'metadata' => [
+                    'bitrix24_operator_id' => $operatorId,
+                ]
+            ]);
+            
+            Log::info('Operator joined open line chat', [
+                'conversation_id' => $conversation->id,
+                'operator_id' => $operatorId,
+                'operator_name' => $operatorName,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle operator join', [
+                'data' => $data,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Создание задачи в Битрикс24
+     */
+    public function createTask(Conversation $conversation, array $params = []): ?array
+    {
+        try {
+            $taskData = [
+                'TITLE' => $params['title'] ?? 'Обработать обращение из чат-бота #' . $conversation->id,
+                'DESCRIPTION' => $params['description'] ?? $this->formatConversationForCRM($conversation),
+                'RESPONSIBLE_ID' => $params['responsible_id'] ?? $this->config['default_responsible_id'] ?? 1,
+                'DEADLINE' => $params['deadline'] ?? now()->addDay()->format('c'),
+                'PRIORITY' => $params['priority'] ?? '1', // 0 - низкий, 1 - средний, 2 - высокий
+                'GROUP_ID' => $params['group_id'] ?? 0,
+            ];
+            
+            // Связываем с CRM сущностями если есть
+            if ($conversation->crm_lead_id) {
+                $taskData['UF_CRM_TASK'] = ['L_' . $conversation->crm_lead_id];
+            } elseif ($conversation->crm_deal_id) {
+                $taskData['UF_CRM_TASK'] = ['D_' . $conversation->crm_deal_id];
+            } elseif ($conversation->crm_contact_id) {
+                $taskData['UF_CRM_TASK'] = ['C_' . $conversation->crm_contact_id];
+            }
+            
+            $response = $this->makeRequest('tasks.task.add', [
+                'fields' => $taskData
+            ]);
+            
+            if (!empty($response['result']['task']['id'])) {
+                // Сохраняем ID задачи
+                $conversation->update([
+                    'metadata' => array_merge($conversation->metadata ?? [], [
+                        'bitrix24_task_id' => $response['result']['task']['id'],
+                        'task_created_at' => now()->toIso8601String(),
+                    ])
+                ]);
+                
+                Log::info('Task created in Bitrix24', [
+                    'task_id' => $response['result']['task']['id'],
+                    'conversation_id' => $conversation->id,
+                ]);
+                
+                return $response['result']['task'];
+            }
+            
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to create task in Bitrix24', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+    
+    /**
+     * Получение списка каналов открытых линий
+     */
+    public function getOpenLineConfigs(): array
+    {
+        try {
+            $response = $this->makeRequest('imopenlines.config.list.get');
+            return $response['result'] ?? [];
+        } catch (\Exception $e) {
+            Log::error('Failed to get open line configs', [
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
+    }
+    
+    /**
+     * Получение статистики по открытым линиям
+     */
+    public function getOpenLineStats(array $params = []): array
+    {
+        try {
+            $filter = [
+                'DATE_CREATE_from' => $params['date_from'] ?? now()->subMonth()->format('Y-m-d'),
+                'DATE_CREATE_to' => $params['date_to'] ?? now()->format('Y-m-d'),
+            ];
+            
+            if (!empty($params['config_id'])) {
+                $filter['CONFIG_ID'] = $params['config_id'];
+            }
+            
+            $response = $this->makeRequest('imopenlines.dialog.list', [
+                'filter' => $filter,
+                'select' => ['*', 'MESSAGES'],
+            ]);
+            
+            $dialogs = $response['result'] ?? [];
+            
+            // Подсчитываем статистику
+            $stats = [
+                'total_dialogs' => count($dialogs),
+                'closed_dialogs' => 0,
+                'active_dialogs' => 0,
+                'average_response_time' => 0,
+                'average_close_time' => 0,
+                'total_messages' => 0,
+                'by_source' => [],
+            ];
+            
+            $responseTimes = [];
+            $closeTimes = [];
+            
+            foreach ($dialogs as $dialog) {
+                if ($dialog['CLOSED'] === 'Y') {
+                    $stats['closed_dialogs']++;
+                    
+                    // Время закрытия
+                    if (!empty($dialog['DATE_CREATE']) && !empty($dialog['DATE_CLOSE'])) {
+                        $created = new \DateTime($dialog['DATE_CREATE']);
+                        $closed = new \DateTime($dialog['DATE_CLOSE']);
+                        $closeTimes[] = $closed->getTimestamp() - $created->getTimestamp();
+                    }
+                } else {
+                    $stats['active_dialogs']++;
+                }
+                
+                // Подсчет сообщений
+                $stats['total_messages'] += count($dialog['MESSAGES'] ?? []);
+                
+                // Группировка по источникам
+                $source = $dialog['SOURCE'] ?? 'unknown';
+                if (!isset($stats['by_source'][$source])) {
+                    $stats['by_source'][$source] = 0;
+                }
+                $stats['by_source'][$source]++;
+                
+                // Время первого ответа оператора
+                if (!empty($dialog['MESSAGES'])) {
+                    $firstUserMessage = null;
+                    $firstOperatorMessage = null;
+                    
+                    foreach ($dialog['MESSAGES'] as $message) {
+                        if (!$firstUserMessage && $message['AUTHOR']['TYPE'] === 'USER') {
+                            $firstUserMessage = new \DateTime($message['DATE_CREATE']);
+                        }
+                        if (!$firstOperatorMessage && $message['AUTHOR']['TYPE'] === 'OPERATOR') {
+                            $firstOperatorMessage = new \DateTime($message['DATE_CREATE']);
+                        }
+                        
+                        if ($firstUserMessage && $firstOperatorMessage) {
+                            $responseTimes[] = $firstOperatorMessage->getTimestamp() - $firstUserMessage->getTimestamp();
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Вычисляем средние значения
+            if (count($responseTimes) > 0) {
+                $stats['average_response_time'] = round(array_sum($responseTimes) / count($responseTimes));
+            }
+            
+            if (count($closeTimes) > 0) {
+                $stats['average_close_time'] = round(array_sum($closeTimes) / count($closeTimes));
+            }
+            
+            return $stats;
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to get open line stats', [
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
+    }
+    
+    /**
+     * Массовая отправка сообщений через открытые линии
+     */
+    public function broadcastMessage(array $chatIds, string $message, array $params = []): array
+    {
+        $results = [
+            'success' => 0,
+            'failed' => 0,
+            'errors' => [],
+        ];
+        
+        foreach ($chatIds as $chatId) {
+            try {
+                $messageData = [
+                    'CHAT_ID' => $chatId,
+                    'MESSAGE' => $message,
+                    'SYSTEM' => $params['system'] ?? 'N',
+                ];
+                
+                if (!empty($params['keyboard'])) {
+                    $messageData['KEYBOARD'] = $params['keyboard'];
+                }
+                
+                $response = $this->makeRequest('imopenlines.message.send', $messageData);
+                
+                if (!empty($response['result'])) {
+                    $results['success']++;
+                } else {
+                    $results['failed']++;
+                    $results['errors'][] = [
+                        'chat_id' => $chatId,
+                        'error' => 'Unknown error'
+                    ];
+                }
+            } catch (\Exception $e) {
+                $results['failed']++;
+                $results['errors'][] = [
+                    'chat_id' => $chatId,
+                    'error' => $e->getMessage()
+                ];
+            }
+        }
+        
+        return $results;
     }
 }

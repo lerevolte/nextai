@@ -109,12 +109,37 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::post('/import', [KnowledgeSourceController::class, 'processImport'])->name('knowledge.import.process');
             });
 
+            Route::prefix('crm')->group(function () {
+                Route::get('/', [App\Http\Controllers\CrmIntegrationController::class, 'index'])->name('crm.index');
+                Route::get('/create', [App\Http\Controllers\CrmIntegrationController::class, 'create'])->name('crm.create');
+                Route::post('/', [App\Http\Controllers\CrmIntegrationController::class, 'store'])->name('crm.store');
+                Route::get('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'show'])->name('crm.show');
+                Route::get('/{integration}/edit', [App\Http\Controllers\CrmIntegrationController::class, 'edit'])->name('crm.edit');
+                Route::put('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'update'])->name('crm.update');
+                Route::delete('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'destroy'])->name('crm.destroy');
+                
+                // API методы
+                Route::post('/{integration}/test-connection', [App\Http\Controllers\CrmIntegrationController::class, 'testConnection'])->name('crm.test-connection');
+                Route::post('/{integration}/sync-conversation', [App\Http\Controllers\CrmIntegrationController::class, 'syncConversation'])->name('crm.sync-conversation');
+                Route::post('/{integration}/bulk-sync', [App\Http\Controllers\CrmIntegrationController::class, 'bulkSync'])->name('crm.bulk-sync');
+                Route::get('/{integration}/fields', [App\Http\Controllers\CrmIntegrationController::class, 'getFields'])->name('crm.fields');
+                Route::get('/{integration}/users', [App\Http\Controllers\CrmIntegrationController::class, 'getUsers'])->name('crm.users');
+                Route::get('/{integration}/pipelines', [App\Http\Controllers\CrmIntegrationController::class, 'getPipelines'])->name('crm.pipelines');
+                Route::post('/{integration}/export', [App\Http\Controllers\CrmIntegrationController::class, 'export'])->name('crm.export');
+                
+                // Настройки бота
+                Route::get('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'botSettings'])->name('crm.bot-settings');
+                Route::put('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'updateBotSettings'])->name('crm.bot-settings.update');
+            });
+
         });
     });
 
 
 });
-
+Route::prefix('webhooks/crm')->group(function () {
+    Route::post('/{type}', [App\Http\Controllers\CrmIntegrationController::class, 'webhook'])->name('webhooks.crm');
+});
 // API роуты
 Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', function (Request $request) {

@@ -47,4 +47,9 @@ class Organization extends Model
             ->whereMonth('messages.created_at', now()->month)
             ->count();
     }
+
+    public function crmIntegrations(): HasMany
+    {
+        return $this->hasMany(CrmIntegration::class);
+    }
 }

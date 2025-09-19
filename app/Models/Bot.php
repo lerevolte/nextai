@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -60,6 +61,23 @@ class Bot extends Model
     public function knowledgeBase(): HasOne
     {
         return $this->hasOne(KnowledgeBase::class);
+    }
+
+    public function crmIntegrations()
+    {
+        return $this->belongsToMany(CrmIntegration::class, 'bot_crm_integrations')
+            ->withPivot([
+                'settings',
+                'sync_contacts',
+                'sync_conversations',
+                'create_leads',
+                'create_deals',
+                'lead_source',
+                'responsible_user_id',
+                'pipeline_settings',
+                'is_active'
+            ])
+            ->withTimestamps();
     }
 
     public function getActiveChannels()
