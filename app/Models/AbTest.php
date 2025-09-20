@@ -53,6 +53,11 @@ class AbTest extends Model
         return $this->hasMany(AbTestVariant::class);
     }
 
+    public function results(): HasMany
+    {
+        return $this->hasMany(AbTestResult::class);
+    }
+
     public function winnerVariant(): BelongsTo
     {
         return $this->belongsTo(AbTestVariant::class, 'winner_variant_id');
@@ -66,5 +71,15 @@ class AbTest extends Model
                 $q->whereNull('ends_at')
                   ->orWhere('ends_at', '>', now());
             });
+    }
+
+    public function scopeDraft($query)
+    {
+        return $query->where('status', 'draft');
+    }
+
+    public function scopeCompleted($query)
+    {
+        return $query->where('status', 'completed');
     }
 }

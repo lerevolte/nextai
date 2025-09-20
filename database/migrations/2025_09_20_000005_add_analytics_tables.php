@@ -11,7 +11,7 @@ class AddAnalyticsTables extends Migration
         Schema::create('hourly_stats', function (Blueprint $table) {
             $table->id();
             $table->foreignId('organization_id')->constrained()->onDelete('cascade');
-            $table->foreignId('bot_id')->nullable()->constrained()->onDelete('cascade');
+            $table->unsignedBigInteger('bot_id')->nullable();
             $table->timestamp('hour');
             $table->integer('conversations_started')->default(0);
             $table->integer('conversations_closed')->default(0);
@@ -27,6 +27,9 @@ class AddAnalyticsTables extends Migration
             $table->unique(['organization_id', 'bot_id', 'hour']);
             $table->index(['organization_id', 'hour']);
             $table->index(['bot_id', 'hour']);
+            
+            // Внешний ключ для bot_id добавляем отдельно с правильной обработкой NULL
+            $table->foreign('bot_id')->references('id')->on('bots')->onDelete('cascade');
         });
 
         // Пользовательские сегменты для аналитики
@@ -35,7 +38,7 @@ class AddAnalyticsTables extends Migration
             $table->foreignId('organization_id')->constrained()->onDelete('cascade');
             $table->string('name');
             $table->text('description')->nullable();
-            $table->json('criteria'); // Критерии сегментации
+            $table->json('criteria');
             $table->integer('user_count')->default(0);
             $table->timestamp('last_calculated_at')->nullable();
             $table->timestamps();
@@ -49,8 +52,8 @@ class AddAnalyticsTables extends Migration
             $table->foreignId('organization_id')->constrained()->onDelete('cascade');
             $table->foreignId('bot_id')->constrained()->onDelete('cascade');
             $table->string('name');
-            $table->json('steps'); // Шаги воронки
-            $table->json('metrics')->nullable(); // Метрики конверсии
+            $table->json('steps');
+            $table->json('metrics')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             

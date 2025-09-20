@@ -281,8 +281,8 @@
                                 <div class="border rounded-lg p-4">
                                     <div class="flex justify-between items-center">
                                         <div class="flex items-center">
-                                            <span class="text-2xl mr-3">{{ $crm->getIcon() }}</span>
-                                            <div>
+                                            <span class="text-2xl mr-3">{!! $crm->getIcon() !!}</span>
+                                            <div class="ml-3">
                                                 <h4 class="font-medium text-gray-900">{{ $crm->name }}</h4>
                                                 <p class="text-sm text-gray-500">{{ $crm->getTypeName() }}</p>
                                             </div>
@@ -304,7 +304,7 @@
                                         </div>
                                     </div>
                                     
-                                    <div class="mt-3 grid grid-cols-2 gap-4 text-sm text-gray-600">
+                                    <!-- <div class="mt-3 grid grid-cols-2 gap-4 text-sm text-gray-600">
                                         <div>
                                             <span class="font-medium">Лиды:</span> 
                                             {{ $crm->pivot->create_leads ? '✅ Создаются' : '❌ Не создаются' }}
@@ -322,7 +322,7 @@
                                             {{ $crm->pivot->sync_conversations ? '✅ Синхронизируются' : '❌ Не синхронизируются' }}
                                         </div>
                                     </div>
-                                    
+                                     -->
                                     @if($crm->last_sync_at)
                                     <div class="mt-3 pt-3 border-t text-xs text-gray-500">
                                         Последняя синхронизация: {{ $crm->last_sync_at->diffForHumans() }}
@@ -333,7 +333,7 @@
                         </div>
                         
                         <!-- Быстрые действия -->
-                        <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                        <!-- <div class="mt-6 p-4 bg-gray-50 rounded-lg">
                             <h4 class="text-sm font-medium text-gray-700 mb-3">Быстрые действия</h4>
                             <div class="flex flex-wrap gap-2">
                                 <button onclick="syncAllConversations()" 
@@ -349,7 +349,7 @@
                                     ⚙️ Настройки интеграций
                                 </a>
                             </div>
-                        </div>
+                        </div> -->
                     @else
                         <div class="text-center py-12 bg-gray-50 rounded-lg">
                             <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

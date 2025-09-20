@@ -25,8 +25,8 @@
                 <div class="p-6">
                     <div class="flex items-center justify-between mb-4">
                         <div class="flex items-center">
-                            <span class="text-3xl mr-3">{{ $integration->getIcon() }}</span>
-                            <div>
+                            <span class="text-3xl mr-3">{!! $integration->getIcon() !!}</span>
+                            <div class="ml-2">
                                 <h3 class="text-lg font-semibold">{{ $integration->name }}</h3>
                                 <p class="text-sm text-gray-500">{{ $integration->getTypeName() }}</p>
                             </div>
