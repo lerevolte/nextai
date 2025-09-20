@@ -28,14 +28,15 @@ class KnowledgeItemObserver
                 'content' => $original['content'],
                 'embedding' => $original['embedding'],
                 'metadata' => $original['metadata'],
-                'created_by' => auth()->id(),
+                // Проверяем, есть ли авторизованный пользователь
+                'created_by' => auth()->check() ? auth()->id() : null,
                 'change_notes' => $changeNotes,
             ]);
             
             $item->version = ($original['version'] ?? 1) + 1;
             
             $item->metadata = array_merge($item->metadata ?? [], [
-                'updated_by' => auth()->id(),
+                'updated_by' => auth()->check() ? auth()->id() : null,
                 'updated_at' => now()->toIso8601String(),
                 'previous_version' => $original['version'] ?? 1,
                 'change_notes' => $changeNotes, // Сохраняем и в метаданных
@@ -87,7 +88,7 @@ class KnowledgeItemObserver
         }
         
         // Если изменения через синхронизацию
-        if (request()->route() && str_contains(request()->route()->getName() ?? '', 'sync')) {
+        if (app()->runningInConsole()) {
             $changes[] = '(автоматическая синхронизация)';
         }
         

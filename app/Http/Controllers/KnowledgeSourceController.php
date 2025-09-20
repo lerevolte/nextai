@@ -122,7 +122,7 @@ class KnowledgeSourceController extends Controller
 
         // Запускаем первую синхронизацию
         if ($request->boolean('sync_now', false)) {
-            SyncKnowledgeSource::dispatch($source);
+            SyncKnowledgeSource::dispatch($source, auth()->id());
             
             return redirect()
                 ->route('knowledge.sources.index', [$organization, $bot])
@@ -140,7 +140,8 @@ class KnowledgeSourceController extends Controller
             abort(403);
         }
 
-        SyncKnowledgeSource::dispatch($source);
+        // Передаем ID пользователя, который инициировал синхронизацию
+        SyncKnowledgeSource::dispatch($source, auth()->id());
 
         return redirect()
             ->route('knowledge.sources.index', [$organization, $bot])

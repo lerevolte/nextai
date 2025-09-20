@@ -33,7 +33,7 @@ class NotionService
         }
     }
 
-    public function syncDatabase(KnowledgeSource $source): array
+    public function syncDatabase(KnowledgeSource $source, ?int $userId = null): array
     {
         $config = $source->config;
         if (!$this->connect($config)) {
@@ -85,7 +85,7 @@ class NotionService
                     if ($item) {
                         if ($this->hasContentChanged($item, $content)) {
                             Log::info("Updating page: {$title}");
-                            $this->saveVersion($item);
+                            $this->saveVersion($item, $userId);
                             $item->update([
                                 'title' => $title,
                                 'content' => $content,
@@ -151,10 +151,19 @@ class NotionService
         $properties = $this->extractProperties($page);
         $propertiesText = "";
         foreach ($properties as $name => $value) {
-            // Пропускаем пустые свойства и title, т.к. он идет отдельно
-            if (!empty($value) && strtolower($name) !== 'title' && strtolower($name) !== 'название') {
+            // Пропускаем title, т.к. он идет отдельно
+            if (strtolower($name) === 'title' || strtolower($name) === 'название') {
+                continue;
+            }
+
+            // Обрабатываем разные типы значений, чтобы пропустить только действительно пустые
+            $isTrulyEmpty = $value === null || $value === '' || $value === [];
+            
+            if (!$isTrulyEmpty) {
                  if (is_array($value)) {
                     $value = implode(', ', $value);
+                } elseif (is_bool($value)) {
+                    $value = $value ? 'Да' : 'Нет';
                 }
                 $propertiesText .= "{$name}: {$value}\n";
             }
@@ -263,15 +272,15 @@ class NotionService
         return md5($item->content) !== md5($newContent);
     }
 
-    protected function saveVersion(KnowledgeItem $item): void
+    protected function saveVersion(KnowledgeItem $item, ?int $userId = null): void
     {
         $item->versions()->create([
             'version' => $item->version,
             'title' => $item->title,
             'content' => $item->content,
             'embedding' => $item->embedding,
-            'metadata' => $item->sync_metadata, // Исправлено с 'metadata' на 'sync_metadata'
-            'created_by' => auth()->id(),
+            'metadata' => $item->sync_metadata,
+            'created_by' => $userId, // Используем переданный ID пользователя
             'change_notes' => 'Автоматическая синхронизация из Notion',
         ]);
     }

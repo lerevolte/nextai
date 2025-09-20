@@ -29,16 +29,35 @@ class ConversationObserver
     /**
      * Handle the Conversation "updated" event.
      */
-    public function updated(Conversation $conversation): void
-    {
-        // Если изменился статус на "closed", синхронизируем с CRM
-        if ($conversation->isDirty('status') && $conversation->status === 'closed') {
-            $this->syncIfNeeded($conversation, 'sync');
-        }
+    // public function updated(Conversation $conversation): void
+    // {
+    //     // Если изменился статус на "closed", синхронизируем с CRM
+    //     if ($conversation->isDirty('status') && $conversation->status === 'closed') {
+    //         $this->syncIfNeeded($conversation, 'sync');
+    //     }
 
-        // Если добавлена контактная информация
-        if ($conversation->isDirty(['user_email', 'user_phone', 'user_name'])) {
-            $this->syncIfNeeded($conversation, 'sync');
+    //     // Если добавлена контактная информация
+    //     if ($conversation->isDirty(['user_email', 'user_phone', 'user_name'])) {
+    //         $this->syncIfNeeded($conversation, 'sync');
+    //     }
+    // }
+
+    public function updated(Conversation $conversation)
+    {
+        // Проверяем, были ли обновлены контактные данные пользователя.
+        if ($conversation->isDirty('user_name') || $conversation->isDirty('user_email') || $conversation->isDirty('user_phone')) {
+            
+            // Убедимся, что имя пользователя не пустое и не "Гость".
+            if (!empty($conversation->user_name) && $conversation->user_name !== 'Гость') {
+                
+                $crmIntegration = $conversation->bot->organization->crmIntegration;
+
+                if ($crmIntegration && $crmIntegration->is_active && !$conversation->crm_deal_id) {
+                    Log::info('Dispatching SyncConversationToCrm job.', ['conversation_id' => $conversation->id]);
+                    // Отправляем задачу на синхронизацию с CRM в очередь.
+                    SyncConversationToCrm::dispatch($conversation);
+                }
+            }
         }
     }
 

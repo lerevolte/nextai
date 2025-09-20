@@ -10,7 +10,7 @@
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
                     <div class="flex items-center">
-                        <span class="text-3xl mr-3">{{ $integration->getIcon() }}</span>
+                        <span class="text-3xl mr-3">{!! $integration->getIcon() !!}</span>
                         <div>
                             <h1 class="text-2xl font-bold text-gray-900">{{ $integration->name }}</h1>
                             <p class="text-gray-500">{{ $integration->getTypeName() }}</p>
@@ -303,9 +303,9 @@
                         @endif
 
                         <div class="pt-6 border-t">
-                            <h4 class="text-sm font-medium text-gray-900 mb-4">Опасная зона</h4>
+                            <!-- <h4 class="text-sm font-medium text-gray-900 mb-4">Опасная зона</h4> -->
                             <button onclick="deleteIntegration()" 
-                                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-700">
                                 Удалить интеграцию
                             </button>
                         </div>

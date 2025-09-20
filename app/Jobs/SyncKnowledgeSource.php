@@ -20,10 +20,18 @@ class SyncKnowledgeSource implements ShouldQueue
     public $tries = 3;
 
     protected KnowledgeSource $source;
+    protected ?int $userId;
 
-    public function __construct(KnowledgeSource $source)
+    /**
+     * Create a new job instance.
+     *
+     * @param KnowledgeSource $source
+     * @param int|null $userId ID пользователя, инициировавшего задачу
+     */
+    public function __construct(KnowledgeSource $source, ?int $userId = null)
     {
         $this->source = $source;
+        $this->userId = $userId;
     }
 
     public function handle()
@@ -40,7 +48,7 @@ class SyncKnowledgeSource implements ShouldQueue
             switch ($this->source->type) {
                 case 'notion':
                     $notionService = new NotionService();
-                    $stats = $notionService->syncDatabase($this->source);
+                    $stats = $notionService->syncDatabase($this->source, $this->userId);
                     break;
                     
                 case 'url':
@@ -226,5 +234,3 @@ class SyncKnowledgeSource implements ShouldQueue
         ]);
     }
 }
-
-

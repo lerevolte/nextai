@@ -13,6 +13,9 @@ use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\KnowledgeSourceController;
+use App\Http\Controllers\AbTestController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\PerformanceController;
 use Illuminate\Support\Facades\Route;
 
 // Публичные роуты
@@ -155,6 +158,41 @@ Route::middleware(['auth', 'verified'])->group(function () {
                     Route::get('/bots', [App\Http\Controllers\SalebotController::class, 'getBots'])->name('crm.salebot.bots');
                     Route::post('/sync-variables', [App\Http\Controllers\SalebotController::class, 'syncClientVariables'])->name('crm.salebot.sync-variables');
                 });
+            });
+
+            // Улучшенный дашборд
+            Route::get('/analytics', [DashboardController::class, 'index'])->name('analytics.index');
+            Route::get('/analytics/refresh', [DashboardController::class, 'refreshMetrics'])->name('analytics.refresh');
+            Route::post('/analytics/export', [DashboardController::class, 'exportMetrics'])->name('analytics.export');
+            
+            // A/B тестирование
+            Route::prefix('ab-tests')->group(function () {
+                Route::get('/', [AbTestController::class, 'index'])->name('ab-tests.index');
+                Route::get('/create', [AbTestController::class, 'create'])->name('ab-tests.create');
+                Route::post('/', [AbTestController::class, 'store'])->name('ab-tests.store');
+                Route::get('/{test}', [AbTestController::class, 'show'])->name('ab-tests.show');
+                Route::get('/{test}/analysis', [AbTestController::class, 'analysis'])->name('ab-tests.analysis');
+                Route::post('/{test}/complete', [AbTestController::class, 'complete'])->name('ab-tests.complete');
+                Route::post('/{test}/pause', [AbTestController::class, 'pause'])->name('ab-tests.pause');
+                Route::delete('/{test}', [AbTestController::class, 'destroy'])->name('ab-tests.destroy');
+            });
+            
+            // Отчеты
+            Route::prefix('reports')->group(function () {
+                Route::get('/', [ReportController::class, 'index'])->name('reports.index');
+                Route::post('/generate', [ReportController::class, 'generate'])->name('reports.generate');
+                Route::get('/scheduled', [ReportController::class, 'scheduled'])->name('reports.scheduled');
+                Route::post('/schedule', [ReportController::class, 'schedule'])->name('reports.schedule');
+                Route::get('/download/{report}', [ReportController::class, 'download'])->name('reports.download');
+                Route::delete('/scheduled/{report}', [ReportController::class, 'deleteScheduled'])->name('reports.scheduled.delete');
+            });
+            
+            // Мониторинг производительности
+            Route::prefix('performance')->group(function () {
+                Route::get('/', [PerformanceController::class, 'index'])->name('performance.index');
+                Route::get('/metrics', [PerformanceController::class, 'metrics'])->name('performance.metrics');
+                Route::post('/optimize', [PerformanceController::class, 'optimize'])->name('performance.optimize');
+                Route::get('/recommendations', [PerformanceController::class, 'recommendations'])->name('performance.recommendations');
             });
 
         });
