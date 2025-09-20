@@ -20,8 +20,11 @@ class NotionService
     public function connect(array $config): bool
     {
         try {
+            // Добавляем дефисы в ID базы данных, если их нет
+            $config['database_id'] = $this->formatDatabaseId($config['database_id']);
+
             $this->client = Notion::create($config['api_token']);
-            // Проверяем подключение, запрашивая информацию о текущем боте (токене)
+            // Проверяем подключение
             $this->client->users()->me();
             return true;
         } catch (\Exception $e) {
@@ -47,10 +50,9 @@ class NotionService
         try {
             $processedIds = [];
             
-            // Сначала найдем базу данных по ее ID.
-            $database = $this->client->databases()->find($config['database_id']);
+            $databaseId = $this->formatDatabaseId($config['database_id']);
+            $database = $this->client->databases()->find($databaseId);
             
-            // Используем встроенный метод для получения всех страниц с пагинацией
             $pages = $this->client->databases()->queryAllPages($database);
 
             foreach ($pages as $page) {
@@ -58,13 +60,15 @@ class NotionService
                     $externalId = $page->id;
                     $processedIds[] = $externalId;
 
-                    $content = $this->extractPageContent($page);
                     $title = $page->title()?->toString() ?? 'Untitled';
+                    // Теперь контент формируется из свойств и блоков внутри страницы
+                    $content = $this->formatContentFromPage($page);
                     
                     Log::info("Processing page: {$title} ({$externalId})");
 
-                    if (empty($content)) {
-                        Log::warning("Content for page '{$title}' is empty. Skipping.");
+                    // Пропускаем только если нет ни заголовка, ни контента
+                    if (($title === 'Untitled' || empty($title)) && empty($content)) {
+                        Log::warning("Page with ID '{$externalId}' is empty. Skipping.");
                         continue;
                     }
 
@@ -139,9 +143,31 @@ class NotionService
         return $stats;
     }
 
+    /**
+     * Формирует единый контент из свойств и блоков страницы.
+     */
+    protected function formatContentFromPage(Page $page): string
+    {
+        $properties = $this->extractProperties($page);
+        $propertiesText = "";
+        foreach ($properties as $name => $value) {
+            // Пропускаем пустые свойства и title, т.к. он идет отдельно
+            if (!empty($value) && strtolower($name) !== 'title' && strtolower($name) !== 'название') {
+                 if (is_array($value)) {
+                    $value = implode(', ', $value);
+                }
+                $propertiesText .= "{$name}: {$value}\n";
+            }
+        }
+
+        $blockContent = $this->extractPageContent($page);
+
+        return trim($propertiesText . "\n\n" . $blockContent);
+    }
+
     protected function extractPageContent(Page $page): string
     {
-        $allBlocks = $this->client->blocks()->findChildren($page->id);
+        $allBlocks = $this->client->blocks()->findChildrenRecursive($page->id);
 
         $content = '';
         foreach ($allBlocks as $block) {
@@ -153,6 +179,7 @@ class NotionService
 
     protected function parseBlock(Block $block): string
     {
+        // ... (код parseBlock остается без изменений) ...
         switch ($block->metadata()->type->value) {
             case BlockType::Paragraph->value:
                 return $block->toString();
@@ -180,6 +207,7 @@ class NotionService
 
     protected function parseTable(Block $tableBlock): string
     {
+        // ... (код parseTable остается без изменений) ...
         $allRows = $this->client->blocks()->findChildren($tableBlock->metadata()->id);
 
         $markdown = '';
@@ -188,7 +216,7 @@ class NotionService
                 $cellsText = array_map(fn($cell) => RichText::multipleToString(...$cell), $row->cells);
                 $markdown .= '| ' . implode(' | ', $cellsText) . " |\n";
 
-                if ($index === 0 && $tableBlock->hasColumnHeader) {
+                if ($index === 0 && isset($tableBlock->hasColumnHeader) && $tableBlock->hasColumnHeader) {
                     $markdown .= '| ' . str_repeat('--- | ', count($row->cells)) . "\n";
                 }
             }
@@ -199,6 +227,7 @@ class NotionService
 
     protected function extractProperties(Page $page): array
     {
+        // ... (код extractProperties остается без изменений) ...
         $properties = [];
         foreach ($page->properties as $name => $property) {
             switch ($property->metadata()->type->value) {
@@ -241,7 +270,7 @@ class NotionService
             'title' => $item->title,
             'content' => $item->content,
             'embedding' => $item->embedding,
-            'metadata' => $item->sync_metadata,
+            'metadata' => $item->sync_metadata, // Исправлено с 'metadata' на 'sync_metadata'
             'created_by' => auth()->id(),
             'change_notes' => 'Автоматическая синхронизация из Notion',
         ]);
@@ -249,6 +278,7 @@ class NotionService
 
     protected function generateEmbedding(KnowledgeItem $item): void
     {
+        // ... (код generateEmbedding остается без изменений) ...
         dispatch(function () use ($item) {
             $embeddingService = app(\App\Services\EmbeddingService::class);
             $text = $item->title . "\n\n" . $item->content;
@@ -259,5 +289,17 @@ class NotionService
             }
         })->afterResponse();
     }
-}
 
+    /**
+     * Notion API требует ID в формате UUID с дефисами.
+     * Эта функция добавляет их, если они отсутствуют.
+     */
+    private function formatDatabaseId(string $id): string
+    {
+        $id = str_replace('-', '', $id);
+        if (strlen($id) !== 32) {
+            return $id; // Возвращаем как есть, если длина некорректна
+        }
+        return substr($id, 0, 8) . '-' . substr($id, 8, 4) . '-' . substr($id, 12, 4) . '-' . substr($id, 16, 4) . '-' . substr($id, 20, 12);
+    }
+}
