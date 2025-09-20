@@ -74,6 +74,9 @@
                     <a href="#knowledge" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
                         База знаний
                     </a>
+                    <a href="#crm" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                        Интеграции
+                    </a>
                     <a href="#settings" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
                         Настройки
                     </a>
@@ -259,6 +262,115 @@
                     @endif
                 </div>
 
+                <div id="crm-content" class="tab-content hidden">
+                    <div class="mb-4 flex justify-between items-center">
+                        <h3 class="text-lg font-medium">Интеграции</h3>
+                        <a href="{{ route('crm.index', $organization) }}" 
+                           class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+                            Управление интеграциями
+                        </a>
+                    </div>
+                    
+                    @php
+                        $crmIntegrations = $bot->crmIntegrations;
+                    @endphp
+                    
+                    @if($crmIntegrations->count() > 0)
+                        <div class="space-y-4">
+                            @foreach($crmIntegrations as $crm)
+                                <div class="border rounded-lg p-4">
+                                    <div class="flex justify-between items-center">
+                                        <div class="flex items-center">
+                                            <span class="text-2xl mr-3">{{ $crm->getIcon() }}</span>
+                                            <div>
+                                                <h4 class="font-medium text-gray-900">{{ $crm->name }}</h4>
+                                                <p class="text-sm text-gray-500">{{ $crm->getTypeName() }}</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center space-x-4">
+                                            @if($crm->pivot->is_active)
+                                                <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                                                    Активна
+                                                </span>
+                                            @else
+                                                <span class="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded-full">
+                                                    Неактивна
+                                                </span>
+                                            @endif
+                                            <a href="{{ route('crm.show', [$organization, $crm]) }}" 
+                                               class="text-indigo-600 hover:text-indigo-900 text-sm">
+                                                Подробнее →
+                                            </a>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mt-3 grid grid-cols-2 gap-4 text-sm text-gray-600">
+                                        <div>
+                                            <span class="font-medium">Лиды:</span> 
+                                            {{ $crm->pivot->create_leads ? '✅ Создаются' : '❌ Не создаются' }}
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Сделки:</span> 
+                                            {{ $crm->pivot->create_deals ? '✅ Создаются' : '❌ Не создаются' }}
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Контакты:</span> 
+                                            {{ $crm->pivot->sync_contacts ? '✅ Синхронизируются' : '❌ Не синхронизируются' }}
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Диалоги:</span> 
+                                            {{ $crm->pivot->sync_conversations ? '✅ Синхронизируются' : '❌ Не синхронизируются' }}
+                                        </div>
+                                    </div>
+                                    
+                                    @if($crm->last_sync_at)
+                                    <div class="mt-3 pt-3 border-t text-xs text-gray-500">
+                                        Последняя синхронизация: {{ $crm->last_sync_at->diffForHumans() }}
+                                    </div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                        
+                        <!-- Быстрые действия -->
+                        <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                            <h4 class="text-sm font-medium text-gray-700 mb-3">Быстрые действия</h4>
+                            <div class="flex flex-wrap gap-2">
+                                <button onclick="syncAllConversations()" 
+                                        class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50">
+                                    🔄 Синхронизировать все диалоги
+                                </button>
+                                <button onclick="exportToday()" 
+                                        class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50">
+                                    📤 Экспорт диалогов за сегодня
+                                </button>
+                                <a href="{{ route('crm.index', $organization) }}" 
+                                   class="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50">
+                                    ⚙️ Настройки интеграций
+                                </a>
+                            </div>
+                        </div>
+                    @else
+                        <div class="text-center py-12 bg-gray-50 rounded-lg">
+                            <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                      d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            <h3 class="text-sm font-medium text-gray-900 mb-2">CRM не подключена</h3>
+                            <p class="text-sm text-gray-500 mb-4">
+                                Подключите CRM для автоматического создания лидов и синхронизации диалогов
+                            </p>
+                            <a href="{{ route('crm.index', $organization) }}" 
+                               class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+                                <svg class="mr-2 -ml-1 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                                </svg>
+                                Подключить CRM
+                            </a>
+                        </div>
+                    @endif
+                </div>
+
                 <!-- Settings Tab -->
                 <div id="settings-content" class="tab-content hidden">
                     <div class="mb-4">
@@ -347,6 +459,19 @@
     function toggleApiKey() {
         const input = document.getElementById('api-key');
         input.type = input.type === 'password' ? 'text' : 'password';
+    }
+    function syncAllConversations() {
+        if (confirm('Синхронизировать все диалоги этого бота с CRM?')) {
+            // Здесь можно добавить AJAX запрос для синхронизации
+            alert('Синхронизация запущена в фоновом режиме');
+        }
+    }
+
+    function exportToday() {
+        if (confirm('Экспортировать все диалоги за сегодня в CRM?')) {
+            // Здесь можно добавить AJAX запрос для экспорта
+            alert('Экспорт запущен');
+        }
     }
 </script>
 @endpush

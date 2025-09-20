@@ -14,7 +14,7 @@ return new class extends Migration
             $table->foreignId('organization_id')->constrained()->onDelete('cascade');
             $table->string('type'); // bitrix24, amocrm, avito
             $table->string('name');
-            $table->json('credentials'); // Зашифрованные данные доступа
+            $table->text('credentials');
             $table->json('settings')->nullable(); // Настройки интеграции
             $table->json('field_mapping')->nullable(); // Маппинг полей
             $table->boolean('is_active')->default(true);

@@ -1,12 +1,12 @@
 @extends('layouts.app')
 
-@section('title', 'CRM Интеграции')
+@section('title', 'Интеграции')
 
 @section('content')
 <div class="py-12">
     <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
         <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-gray-900">CRM Интеграции</h2>
+            <h2 class="text-2xl font-bold text-gray-900">Интеграции</h2>
             <a href="{{ route('crm.create', $organization) }}" 
                class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
                 Добавить интеграцию
@@ -95,8 +95,8 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                           d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
                 </svg>
-                <h3 class="mt-2 text-sm font-medium text-gray-900">Нет CRM интеграций</h3>
-                <p class="mt-1 text-sm text-gray-500">Начните с добавления интеграции с вашей CRM системой</p>
+                <h3 class="mt-2 text-sm font-medium text-gray-900">Нет интеграций</h3>
+                <p class="mt-1 text-sm text-gray-500">Начните с добавления интеграции с вашей системой</p>
                 <div class="mt-6">
                     <a href="{{ route('crm.create', $organization) }}" 
                        class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
@@ -111,17 +111,17 @@
         </div>
 
         <!-- Доступные типы интеграций -->
-        <div class="mt-12">
+        <div class="mt-12" style="display: none;">
             <h3 class="text-lg font-semibold mb-4">Доступные интеграции</h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 @foreach($availableTypes as $type => $info)
                 <div class="bg-gray-50 rounded-lg p-4">
                     <div class="flex items-center mb-2">
-                        <span class="text-2xl mr-2">{{ $info['icon'] }}</span>
+                        <span class="text-2xl mr-2" style="display: none">{{ $info['icon'] }}</span>
                         <h4 class="font-medium">{{ $info['name'] }}</h4>
                     </div>
                     <p class="text-sm text-gray-600 mb-3">{{ $info['description'] }}</p>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex flex-wrap gap-1" style="display: none">
                         @foreach($info['features'] as $feature => $available)
                             @if($available)
                             <span class="px-2 py-1 bg-white text-gray-700 text-xs rounded">

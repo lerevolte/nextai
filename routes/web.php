@@ -117,6 +117,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::get('/{integration}/edit', [App\Http\Controllers\CrmIntegrationController::class, 'edit'])->name('crm.edit');
                 Route::put('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'update'])->name('crm.update');
                 Route::delete('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'destroy'])->name('crm.destroy');
+                Route::post('/{integration}/test', [App\Http\Controllers\CrmIntegrationController::class, 'test'])->name('crm.test');
                 
                 // API методы
                 Route::post('/{integration}/test-connection', [App\Http\Controllers\CrmIntegrationController::class, 'testConnection'])->name('crm.test-connection');
@@ -130,6 +131,30 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 // Настройки бота
                 Route::get('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'botSettings'])->name('crm.bot-settings');
                 Route::put('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'updateBotSettings'])->name('crm.bot-settings.update');
+
+                // Salebot специфичные методы
+                Route::group([
+                    'prefix' => '/{integration}/salebot',
+                    'middleware' => [function (Request $request, $next) {
+                        $integration = $request->route('integration');
+                        // Проверяем, что модель была найдена и ее тип соответствует 'salebot'
+                        if (!$integration || $integration->type !== 'salebot') {
+                            abort(404);
+                        }
+                        return $next($request);
+                    }]
+                ], function () {
+                    Route::get('/funnels', [App\Http\Controllers\SalebotController::class, 'getFunnels'])->name('crm.salebot.funnels');
+                    Route::get('/funnel-blocks', [App\Http\Controllers\SalebotController::class, 'getFunnelBlocks'])->name('crm.salebot.funnel-blocks');
+                    Route::post('/start-funnel', [App\Http\Controllers\SalebotController::class, 'startFunnel'])->name('crm.salebot.start-funnel');
+                    Route::post('/stop-funnel', [App\Http\Controllers\SalebotController::class, 'stopFunnel'])->name('crm.salebot.stop-funnel');
+                    Route::post('/transfer-operator', [App\Http\Controllers\SalebotController::class, 'transferToOperator'])->name('crm.salebot.transfer-operator');
+                    Route::post('/broadcast', [App\Http\Controllers\SalebotController::class, 'broadcast'])->name('crm.salebot.broadcast');
+                    Route::get('/funnel-stats', [App\Http\Controllers\SalebotController::class, 'getFunnelStats'])->name('crm.salebot.funnel-stats');
+                    Route::post('/create-variable', [App\Http\Controllers\SalebotController::class, 'createVariable'])->name('crm.salebot.create-variable');
+                    Route::get('/bots', [App\Http\Controllers\SalebotController::class, 'getBots'])->name('crm.salebot.bots');
+                    Route::post('/sync-variables', [App\Http\Controllers\SalebotController::class, 'syncClientVariables'])->name('crm.salebot.sync-variables');
+                });
             });
 
         });

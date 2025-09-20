@@ -114,9 +114,36 @@ class CrmIntegration extends Model
     public function getIcon(): string
     {
         $icons = [
-            'bitrix24' => '🏢',
-            'amocrm' => '📊',
-            'avito' => '🏪',
+            'bitrix24' => '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="12" fill="#3ac8f5"/>
+                  <image 
+                    x="4" 
+                    y="4" 
+                    width="16" 
+                    height="16" 
+                    href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 42 42%22%3E%3Cpath fill=%22%23FFF%22 d=%22M22.09 17.926h-1.386v3.716h3.551v-1.386H22.09v-2.33zm-.616 7.356a4.718 4.718 0 1 1 0-9.436 4.718 4.718 0 0 1 0 9.436zm9.195-6A5.19 5.19 0 0 0 23.721 14a5.19 5.19 0 0 0-9.872 1.69A6.234 6.234 0 0 0 15.233 28h14.761c2.444 0 4.425-1.724 4.425-4.425 0-3.497-3.406-4.379-3.75-4.293z%22/%3E%3C/svg%3E"
+                  />
+                </svg>',
+            'amocrm' => '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="12" fill="#3ac8f5"/>
+                  <image 
+                    x="4" 
+                    y="4" 
+                    width="16" 
+                    height="16" 
+                    href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 42 42%22%3E%3Cpath fill=%22%23FFF%22 d=%22M22.09 17.926h-1.386v3.716h3.551v-1.386H22.09v-2.33zm-.616 7.356a4.718 4.718 0 1 1 0-9.436 4.718 4.718 0 0 1 0 9.436zm9.195-6A5.19 5.19 0 0 0 23.721 14a5.19 5.19 0 0 0-9.872 1.69A6.234 6.234 0 0 0 15.233 28h14.761c2.444 0 4.425-1.724 4.425-4.425 0-3.497-3.406-4.379-3.75-4.293z%22/%3E%3C/svg%3E"
+                  />
+                </svg>',
+            'avito' => '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="12" fill="#3ac8f5"/>
+                  <image 
+                    x="4" 
+                    y="4" 
+                    width="16" 
+                    height="16" 
+                    href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 42 42%22%3E%3Cpath fill=%22%23FFF%22 d=%22M22.09 17.926h-1.386v3.716h3.551v-1.386H22.09v-2.33zm-.616 7.356a4.718 4.718 0 1 1 0-9.436 4.718 4.718 0 0 1 0 9.436zm9.195-6A5.19 5.19 0 0 0 23.721 14a5.19 5.19 0 0 0-9.872 1.69A6.234 6.234 0 0 0 15.233 28h14.761c2.444 0 4.425-1.724 4.425-4.425 0-3.497-3.406-4.379-3.75-4.293z%22/%3E%3C/svg%3E"
+                  />
+                </svg>',
         ];
 
         return $icons[$this->type] ?? '🔗';
@@ -158,4 +185,6 @@ class CrmIntegration extends Model
             'error_message' => $errorMessage,
         ]);
     }
+
+    
 }

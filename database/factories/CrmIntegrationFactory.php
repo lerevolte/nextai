@@ -25,7 +25,7 @@ class CrmIntegrationFactory extends Factory
      */
     public function definition(): array
     {
-        $type = $this->faker->randomElement(['bitrix24', 'amocrm', 'avito']);
+        $type = $this->faker->randomElement(['bitrix24', 'amocrm', 'avito', 'salebot']);
         
         return [
             'organization_id' => Organization::factory(),
@@ -39,8 +39,26 @@ class CrmIntegrationFactory extends Factory
             'sync_status' => [
                 'last_status' => 'success',
                 'last_message' => null,
+            'salebot' => [
+                'api_key' => $this->faker->sha256(),
+                'bot_id' => $this->faker->uuid(),
+            'salebot' => [
+                'default_funnel_id' => $this->faker->optional()->uuid(),
+                'auto_start_funnel' => $this->faker->boolean(),
+                'sync_variables' => $this->faker->boolean(),
             ],
         ];
+    /**
+     * Indicate that the integration is for Salebot.
+     */
+    public function salebot(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => 'salebot',
+            'name' => 'Salebot Integration',
+            'credentials' => $this->getCredentialsForType('salebot'),
+            'settings' => $this->getSettingsForType('salebot'),
+        ]);
     }
 
     /**

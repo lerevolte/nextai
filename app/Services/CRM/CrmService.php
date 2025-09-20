@@ -230,43 +230,7 @@ class CrmService
      */
     public function getAvailableTypes(): array
     {
-        return [
-            'bitrix24' => [
-                'name' => 'Битрикс24',
-                'description' => 'Интеграция с Битрикс24 CRM и открытыми линиями',
-                'icon' => '🏢',
-                'features' => [
-                    'leads' => true,
-                    'deals' => true,
-                    'contacts' => true,
-                    'tasks' => true,
-                    'open_lines' => true,
-                ],
-            ],
-            'amocrm' => [
-                'name' => 'AmoCRM',
-                'description' => 'Интеграция с AmoCRM',
-                'icon' => '📊',
-                'features' => [
-                    'leads' => true,
-                    'deals' => true,
-                    'contacts' => true,
-                    'tasks' => true,
-                    'pipelines' => true,
-                ],
-            ],
-            'avito' => [
-                'name' => 'Avito',
-                'description' => 'Интеграция с Avito Messenger',
-                'icon' => '🏪',
-                'features' => [
-                    'chats' => true,
-                    'messages' => true,
-                    'items' => true,
-                    'statistics' => true,
-                ],
-            ],
-        ];
+        
         return [
             'bitrix24' => [
                 'name' => 'Битрикс24',

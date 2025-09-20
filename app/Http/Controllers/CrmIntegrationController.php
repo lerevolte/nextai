@@ -484,4 +484,26 @@ class CrmIntegrationController extends Controller
             ->route('crm.show', [$organization, $integration])
             ->with('success', 'Настройки бота обновлены');
     }
+
+    /**
+     * Test the connection for the specified CRM integration.
+     *
+     * @param  \App\Models\CrmIntegration  $crmIntegration
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function test(Organization $organization, CrmIntegration $integration)
+    {
+        try {
+            $crmService = new \App\Services\CRM\CrmService($integration->type, $integration->credentials);
+
+            if ($crmService->testConnection($integration)) {
+                return back()->with('success', 'Соединение с CRM успешно установлено.');
+            } else {
+                return back()->with('error', 'Не удалось подключиться к CRM. Проверьте правильность webhook URL и других учетных данных.');
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Ошибка при проверке соединения с CRM: ' . $e->getMessage());
+            return back()->with('error', 'Произошла непредвиденная ошибка при проверке соединения: ' . $e->getMessage());
+        }
+    }
 }

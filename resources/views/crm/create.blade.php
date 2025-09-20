@@ -34,7 +34,6 @@
                                    {{ old('type') == $type ? 'checked' : '' }}>
                             <div class="flex flex-1">
                                 <div class="flex flex-col">
-                                    <span class="block text-2xl mb-2">{{ $info['icon'] }}</span>
                                     <span class="block text-sm font-medium text-gray-900">{{ $info['name'] }}</span>
                                     <span class="mt-1 flex items-center text-xs text-gray-500">
                                         {{ $info['description'] }}
