@@ -203,6 +203,29 @@ Route::middleware(['auth', 'verified'])->group(function () {
 Route::prefix('webhooks/crm')->group(function () {
     Route::post('/{type}', [App\Http\Controllers\CrmIntegrationController::class, 'webhook'])->name('webhooks.crm');
 });
+
+Route::prefix('webhooks/crm/bitrix24/connector')->group(function () {
+    // Обработчик настройки коннектора (вызывается из Битрикс24 при подключении)
+    Route::post('/settings', [App\Http\Controllers\Bitrix24ConnectorController::class, 'settings'])
+        ->name('webhooks.bitrix24.connector.settings')
+        ->withoutMiddleware(['web', 'csrf']);
+    
+    // Обработчик событий от коннектора (сообщения от операторов)
+    Route::post('/handler', [App\Http\Controllers\Bitrix24ConnectorController::class, 'handler'])
+        ->name('webhooks.bitrix24.connector.handler')
+        ->withoutMiddleware(['web', 'csrf']);
+});
+
+// API для управления коннектором (защищенные)
+Route::middleware(['auth'])->prefix('api/crm/bitrix24/connector')->group(function () {
+    // Регистрация коннектора для бота
+    Route::post('/register', [App\Http\Controllers\Bitrix24ConnectorController::class, 'register'])
+        ->name('api.bitrix24.connector.register');
+    
+    // Отмена регистрации коннектора
+    Route::post('/unregister', [App\Http\Controllers\Bitrix24ConnectorController::class, 'unregister'])
+        ->name('api.bitrix24.connector.unregister');
+});
 // API роуты
 Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', function (Request $request) {

@@ -266,6 +266,138 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                                <h5 class="font-medium text-blue-900 mb-4">Настройка коннектора открытых линий</h5>
+                                
+                                <div class="space-y-4">
+                                    <!-- Статус коннектора для каждого бота -->
+                                    @foreach($integration->bots as $bot)
+                                    <div class="p-4 bg-white rounded border {{ $bot->metadata['bitrix24_connector_registered'] ?? false ? 'border-green-300' : 'border-gray-300' }}">
+                                        <div class="flex justify-between items-center">
+                                            <div>
+                                                <h6 class="font-medium">{{ $bot->name }}</h6>
+                                                <p class="text-sm text-gray-600">
+                                                    ID коннектора: <code class="px-1 bg-gray-100 rounded">chatbot_{{ $bot->organization_id }}_{{ $bot->id }}</code>
+                                                </p>
+                                                @if($bot->metadata['bitrix24_connector_registered'] ?? false)
+                                                    <p class="text-sm text-green-600 mt-1">
+                                                        ✅ Коннектор зарегистрирован
+                                                    </p>
+                                                @else
+                                                    <p class="text-sm text-orange-600 mt-1">
+                                                        ⚠️ Коннектор не зарегистрирован
+                                                    </p>
+                                                @endif
+                                            </div>
+                                            
+                                            <div class="flex space-x-2">
+                                                @if(!($bot->metadata['bitrix24_connector_registered'] ?? false))
+                                                    <button onclick="registerConnector({{ $bot->id }})" 
+                                                            class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                                                        Зарегистрировать
+                                                    </button>
+                                                @else
+                                                    <button onclick="unregisterConnector({{ $bot->id }})" 
+                                                            class="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                                                        Удалить регистрацию
+                                                    </button>
+                                                @endif
+                                            </div>
+                                        </div>
+                                    </div>
+                                    @endforeach
+                                </div>
+                                
+                                <div class="mt-4 p-4 bg-blue-100 rounded">
+                                    <h6 class="font-medium text-blue-900 mb-2">Инструкция по подключению:</h6>
+                                    <ol class="list-decimal list-inside text-sm text-blue-800 space-y-1">
+                                        <li>Нажмите "Зарегистрировать" для нужного бота</li>
+                                        <li>Перейдите в Битрикс24: <strong>CRM → Клиенты → Контакт-центр</strong></li>
+                                        <li>Найдите блок с названием вашего бота</li>
+                                        <li>Нажмите "Подключить"</li>
+                                        <li>Выберите нужную открытую линию</li>
+                                        <li>Дождитесь сообщения "successfully"</li>
+                                    </ol>
+                                </div>
+                                
+                                <div class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded">
+                                    <h6 class="font-medium text-yellow-900 mb-2">⚠️ Важно:</h6>
+                                    <ul class="list-disc list-inside text-sm text-yellow-800 space-y-1">
+                                        <li>Каждый бот должен быть зарегистрирован отдельно</li>
+                                        <li>После регистрации коннектор появится в Контакт-центре Битрикс24</li>
+                                        <li>Один бот может быть подключен только к одной открытой линии</li>
+                                        <li>При удалении регистрации все активные подключения будут разорваны</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <script>
+                            function registerConnector(botId) {
+                                if (!confirm('Зарегистрировать коннектор для этого бота?')) {
+                                    return;
+                                }
+                                
+                                fetch('/api/crm/bitrix24/connector/register', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                        'Accept': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        bot_id: botId,
+                                        integration_id: {{ $integration->id }}
+                                    })
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        alert('✅ ' + data.message);
+                                        location.reload();
+                                    } else {
+                                        alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error:', error);
+                                    alert('❌ Ошибка при регистрации коннектора');
+                                });
+                            }
+
+                            function unregisterConnector(botId) {
+                                if (!confirm('Удалить регистрацию коннектора? Все активные подключения будут разорваны.')) {
+                                    return;
+                                }
+                                
+                                fetch('/api/crm/bitrix24/connector/unregister', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                        'Accept': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        bot_id: botId,
+                                        integration_id: {{ $integration->id }}
+                                    })
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        alert('✅ ' + data.message);
+                                        location.reload();
+                                    } else {
+                                        alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error:', error);
+                                    alert('❌ Ошибка при удалении регистрации');
+                                });
+                            }
+                            </script>
+
                         @elseif($integration->type == 'salebot')
                             <div>
                                 <h4 class="text-sm font-medium text-gray-900 mb-4">Настройки Salebot</h4>
