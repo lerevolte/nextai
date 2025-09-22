@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'bitrix24' => [
+        'client_id' => env('BITRIX24_CLIENT_ID'),
+        'client_secret' => env('BITRIX24_CLIENT_SECRET'),
+        'scope' => 'imconnector,imopenlines,crm,user',
+    ],
+
 ];

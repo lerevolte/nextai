@@ -68,10 +68,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::prefix('organization')->group(function () {
         Route::get('/settings', [OrganizationController::class, 'settings'])->name('organization.settings');
         Route::put('/settings', [OrganizationController::class, 'update'])->name('organization.update');
-        
+        Route::post('/regenerate-api-key', [OrganizationController::class, 'regenerateApiKey'])
+            ->name('organization.regenerate-api-key');
         // Пользователи
         Route::resource('users', UserController::class)->middleware('permission:users.view');
+
     });
+
     
     // Боты
     Route::middleware(['organization.access'])->group(function () {
@@ -225,6 +228,42 @@ Route::middleware(['auth'])->prefix('api/crm/bitrix24/connector')->group(functio
     // Отмена регистрации коннектора
     Route::post('/unregister', [App\Http\Controllers\Bitrix24ConnectorController::class, 'unregister'])
         ->name('api.bitrix24.connector.unregister');
+});
+
+Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function () {
+    // Установка приложения
+     Route::match(['GET', 'POST'], '/install', [App\Http\Controllers\Bitrix24AppController::class, 'install'])
+        ->name('bitrix24.install');
+    
+    // Главная страница приложения (iframe). Также разрешаем GET и POST.
+    Route::match(['GET', 'POST'], '/', [App\Http\Controllers\Bitrix24AppController::class, 'index'])
+        ->name('bitrix24.index');
+    
+    // Регистрация коннектора
+    Route::post('/register-connector', [App\Http\Controllers\Bitrix24AppController::class, 'registerConnector'])
+        ->name('bitrix24.register-connector');
+    Route::post('/unregister-connector', [App\Http\Controllers\Bitrix24AppController::class, 'unregisterConnector'])->name('bitrix24.unregisterConnector');
+    
+    // Активация коннектора (PLACEMENT_HANDLER)
+    Route::post('/activate-connector', [App\Http\Controllers\Bitrix24AppController::class, 'activateConnector'])
+        ->name('bitrix24.activate-connector');
+    
+    // Обработчик событий
+    Route::post('/event-handler', [App\Http\Controllers\Bitrix24AppController::class, 'eventHandler'])
+        ->name('bitrix24.event-handler');
+
+
+    Route::post('/login', [App\Http\Controllers\Bitrix24AppController::class, 'login'])
+        ->name('bitrix24.login')
+        ->middleware(['web']); // Нужна сессия для авторизации
+        
+    Route::post('/register', [App\Http\Controllers\Bitrix24AppController::class, 'register'])
+        ->name('bitrix24.register')
+        ->middleware(['web']);
+        
+    Route::post('/link-api', [App\Http\Controllers\Bitrix24AppController::class, 'linkByApiKey'])
+        ->name('bitrix24.link-api')
+        ->middleware(['web']);
 });
 // API роуты
 Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {

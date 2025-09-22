@@ -13,10 +13,12 @@ class Bitrix24Provider implements CrmProviderInterface
 {
     protected Client $client;
     protected CrmIntegration $integration;
-    protected string $webhookUrl;
+    protected ?string $webhookUrl = null;
     protected ?string $accessToken = null;
     protected ?string $refreshToken = null;
     protected array $config;
+    protected ?string $oauthRestUrl = null;
+
 
     public function __construct(CrmIntegration $integration)
     {
@@ -27,16 +29,21 @@ class Bitrix24Provider implements CrmProviderInterface
         ]);
         
         $this->config = $integration->credentials ?? [];
-        
-        // Определяем тип авторизации
+
+        // --- ИСПРАВЛЕНИЕ: Используем два отдельных if вместо if/elseif ---
+        // Это позволяет корректно обрабатывать случай, когда установленное приложение
+        // имеет и webhook (для событий), и OAuth-токены (для API-запросов).
+
+        // 1. Инициализируем вебхук, если он есть
         if (isset($this->config['webhook_url'])) {
-            // Входящий вебхук (простой способ)
             $this->webhookUrl = rtrim($this->config['webhook_url'], '/') . '/';
-        } elseif (isset($this->config['access_token'])) {
-            // OAuth 2.0 авторизация
-            $this->accessToken = $this->config['access_token'];
-            $this->refreshToken = $this->config['refresh_token'] ?? null;
-            $this->webhookUrl = 'https://' . $this->config['domain'] . '/rest/';
+        }
+        
+        // 2. Инициализируем OAuth-данные, если они есть
+        if (isset($this->config['auth_id']) && isset($this->config['domain'])) {
+            $this->accessToken = $this->config['auth_id'];
+            $this->refreshToken = $this->config['refresh_id'] ?? null;
+            $this->oauthRestUrl = 'https://' . $this->config['domain'] . '/rest/';
         }
     }
 
@@ -407,6 +414,7 @@ class Bitrix24Provider implements CrmProviderInterface
      */
     public function syncConversation(Conversation $conversation): bool
     {
+        info('syncConversation in Bitrix24Provider');
         try {
             // 1. Синхронизируем контакт
             $contactData = [
@@ -414,7 +422,7 @@ class Bitrix24Provider implements CrmProviderInterface
                 'email' => $conversation->user_email,
                 'phone' => $conversation->user_phone,
             ];
-
+            info('syncContact');
             $contact = $this->syncContact($contactData);
             
             if (!empty($contact['ID'])) {
@@ -444,12 +452,13 @@ class Bitrix24Provider implements CrmProviderInterface
                     ]);
                 }
             }
-
+            info('syncMessages');
             // 3. Синхронизируем сообщения
             $this->syncMessages($conversation);
 
             return true;
         } catch (\Exception $e) {
+            info('syncConversation '.$e->getMessage());
             Log::error('Bitrix24 sync conversation failed', [
                 'conversation_id' => $conversation->id,
                 'error' => $e->getMessage(),
@@ -675,36 +684,55 @@ class Bitrix24Provider implements CrmProviderInterface
      */
     protected function makeRequest(string $method, array $params = []): array
     {
+        // --- ИСПРАВЛЕНИЕ: Улучшенная логика с явной обработкой ошибки токена и однократной попыткой обновления ---
+        $isOauth = $this->oauthRestUrl && $this->accessToken;
+        $url = $isOauth ? ($this->oauthRestUrl . $method) : ($this->webhookUrl . $method);
+
+        if (!$url) {
+            throw new \Exception('Bitrix24 integration is not configured with Webhook URL or OAuth.');
+        }
+
+        if ($isOauth) {
+            $params['auth'] = $this->accessToken;
+        }
+
         try {
-            $url = $this->webhookUrl . $method;
-
-            // Добавляем токен если используется OAuth
-            if ($this->accessToken) {
-                $params['auth'] = $this->accessToken;
-            }
-
-            $response = $this->client->post($url, [
-                'json' => $params,
-            ]);
-
+            $response = $this->client->post($url, ['json' => $params]);
             $result = json_decode($response->getBody()->getContents(), true);
 
-            // Проверяем на ошибки
-            if (!empty($result['error'])) {
-                // Если токен истек, пробуем обновить
-                if ($result['error'] === 'expired_token' && $this->refreshToken) {
-                    $this->refreshAccessToken();
-                    return $this->makeRequest($method, $params);
-                }
+            // Явно проверяем ошибку истекшего токена
+            if (isset($result['error']) && $result['error'] === 'expired_token') {
+                // Пытаемся обновить токен только если есть refresh_token
+                if ($this->refreshToken) {
+                    Log::info('Bitrix24 token expired, attempting refresh.', ['integration_id' => $this->integration->id]);
+                    $this->refreshAccessToken(); // Этот метод обновит $this->accessToken
 
+                    // Повторяем запрос ОДИН раз с новым токеном
+                    Log::info('Retrying Bitrix24 API request with new token.');
+                    $params['auth'] = $this->accessToken; // Убедимся, что используем новый токен
+                    $retryUrl = $this->oauthRestUrl . $method; // После обновления всегда используем OAuth URL
+                    
+                    $retryResponse = $this->client->post($retryUrl, ['json' => $params]);
+                    $finalResult = json_decode($retryResponse->getBody()->getContents(), true);
+
+                    if (!empty($finalResult['error'])) {
+                         throw new \Exception($finalResult['error_description'] ?? $finalResult['error']);
+                    }
+                    return $finalResult;
+                }
+            }
+
+            if (!empty($result['error'])) {
                 throw new \Exception($result['error_description'] ?? $result['error']);
             }
 
             return $result;
+
         } catch (\Exception $e) {
             Log::error('Bitrix24 API request failed', [
                 'method' => $method,
-                'params' => $params,
+                'url_used' => $url,
+                'params_keys' => array_keys($params),
                 'error' => $e->getMessage(),
             ]);
             throw $e;
@@ -720,8 +748,8 @@ class Bitrix24Provider implements CrmProviderInterface
             $response = $this->client->get('https://oauth.bitrix.info/oauth/token/', [
                 'query' => [
                     'grant_type' => 'refresh_token',
-                    'client_id' => $this->config['client_id'],
-                    'client_secret' => $this->config['client_secret'],
+                    'client_id' => config('services.bitrix24.client_id'),
+                    'client_secret' => config('services.bitrix24.client_secret'),
                     'refresh_token' => $this->refreshToken,
                 ],
             ]);
@@ -733,17 +761,25 @@ class Bitrix24Provider implements CrmProviderInterface
                 $this->refreshToken = $data['refresh_token'];
 
                 // Обновляем в БД
-                $this->integration->update([
-                    'credentials' => array_merge($this->config, [
-                        'access_token' => $this->accessToken,
-                        'refresh_token' => $this->refreshToken,
-                    ]),
+                $newCredentials = array_merge($this->config, [
+                    'auth_id' => $this->accessToken, // Используем auth_id для совместимости
+                    'refresh_id' => $this->refreshToken,
                 ]);
+
+                $this->integration->update(['credentials' => $newCredentials]);
+                // Обновляем конфиг в текущем экземпляре класса
+                $this->config = $newCredentials;
+
+            } else {
+                 throw new \Exception('Failed to get new access token from refresh token response.');
             }
         } catch (\Exception $e) {
             Log::error('Bitrix24 token refresh failed', [
+                'integration_id' => $this->integration->id,
                 'error' => $e->getMessage(),
             ]);
+            // Деактивируем интеграцию, чтобы избежать спама ошибками
+            $this->integration->update(['is_active' => false]);
             throw $e;
         }
     }
@@ -902,17 +938,21 @@ class Bitrix24Provider implements CrmProviderInterface
      */
     protected function syncMessages(Conversation $conversation): void
     {
+        info('syncMessages 1');
         try {
             // Проверяем, есть ли чат в открытых линиях
             $chatId = $conversation->metadata['bitrix24_chat_id'] ?? null;
             
             if (!$chatId) {
+                info('Создаем чат если его нет');
                 // Создаем чат если его нет
                 $chat = $this->createOpenLineChat($conversation);
+                info($chat);
                 $chatId = $chat['CHAT_ID'] ?? null;
             }
             
             if (!$chatId) {
+                info('Unable to sync messages - no chat ID');
                 Log::warning('Unable to sync messages - no chat ID', [
                     'conversation_id' => $conversation->id
                 ]);
@@ -948,9 +988,9 @@ class Bitrix24Provider implements CrmProviderInterface
                     if ($message->attachments) {
                         $messageData['FILES'] = $this->prepareAttachments($message->attachments);
                     }
-                    
+                    info('imopenlines.message.add');
                     $response = $this->makeRequest('imopenlines.message.add', $messageData);
-                    
+                    info($response);
                     // Обновляем ID последнего синхронизированного сообщения
                     $conversation->update([
                         'metadata' => array_merge($conversation->metadata ?? [], [
@@ -960,6 +1000,7 @@ class Bitrix24Provider implements CrmProviderInterface
                     ]);
                     
                 } catch (\Exception $e) {
+                    info('Failed to sync message to Bitrix24 '.$e->getMessage());
                     Log::error('Failed to sync message to Bitrix24', [
                         'message_id' => $message->id,
                         'error' => $e->getMessage()
@@ -968,6 +1009,7 @@ class Bitrix24Provider implements CrmProviderInterface
             }
             
         } catch (\Exception $e) {
+            info('Messages sync failed'.$e->getMessage());
             Log::error('Messages sync failed', [
                 'conversation_id' => $conversation->id,
                 'error' => $e->getMessage()

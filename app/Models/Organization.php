@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Organization extends Model
 {
@@ -13,6 +14,7 @@ class Organization extends Model
     protected $fillable = [
         'name',
         'slug',
+        'api_key',
         'settings',
         'bots_limit',
         'messages_limit',
@@ -25,6 +27,18 @@ class Organization extends Model
         'bots_limit' => 'integer',
         'messages_limit' => 'integer'
     ];
+
+    protected static function boot()
+    {
+        parent::boot();
+        
+        // Автоматически генерируем API ключ при создании
+        static::creating(function ($organization) {
+            if (empty($organization->api_key)) {
+                $organization->api_key = 'org_' . Str::random(32);
+            }
+        });
+    }
 
     public function users(): HasMany
     {

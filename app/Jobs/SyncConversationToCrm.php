@@ -139,6 +139,7 @@ class SyncConversationToCrm implements ShouldQueue
 
             case 'sync':
             default:
+                info('syncConversatio1n');
                 $provider->syncConversation($this->conversation);
                 break;
         }

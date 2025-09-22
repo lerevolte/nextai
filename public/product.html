@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Лимонная кислота моногидрат - ТЕСТ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .form-input {
+            background-color: #f1f5f9; /* slate-100 */
+            border-color: #cbd5e1; /* slate-300 */
+            color: #1e293b; /* slate-800 */
+        }
+        .form-input:focus {
+            --tw-ring-color: #0ea5e9; /* sky-500 */
+            border-color: #0ea5e9;
+        }
+        .prose h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #1e293b;
+        }
+         .prose p, .prose ul li {
+            color: #475569;
+        }
+    </style>
+</head>
+<body class="text-slate-700">
+
+    <!-- App Wrapper -->
+    <div id="app" class="bg-white">
+
+       <!-- Header -->
+        <header class="sticky top-0 z-50 bg-white/80 backdrop-blur-sm border-b border-slate-200">
+            <nav class="container mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <a href="/home.html" class="text-2xl font-bold text-slate-900">
+                        ТЕСТ
+                    </a>
+                    
+                    <!-- Desktop Menu -->
+                    <div class="hidden md:flex items-center space-x-8 text-slate-600">
+                        <a href="index.html#about" class="hover:text-sky-600 transition-colors">О компании</a>
+                        <a href="index.html#products" class="hover:text-sky-600 transition-colors">Продукция</a>
+                        <a href="index.html#delivery" class="hover:text-sky-600 transition-colors">Доставка и оплата</a>
+                        <a href="index.html#news" class="hover:text-sky-600 transition-colors">Новости</a>
+                        <a href="index.html#contact" class="hover:text-sky-600 transition-colors">Контакты</a>
+                    </div>
+
+                    <a href="index.html#contact-form" class="hidden md:block bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 px-6 rounded-lg transition-all">
+                        Оставить заявку
+                    </a>
+
+                    <!-- Mobile Menu Button -->
+                    <button id="mobile-menu-button" class="md:hidden text-slate-700 focus:outline-none">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+                        </svg>
+                    </button>
+                </div>
+            </nav>
+            <!-- Mobile Menu -->
+            <div id="mobile-menu" class="hidden md:hidden bg-white px-6 pb-4 space-y-2">
+                 <a href="index.html#about" class="block hover:text-sky-600 transition-colors">О компании</a>
+                <a href="index.html#products" class="block hover:text-sky-600 transition-colors">Продукция</a>
+                <a href="index.html#delivery" class="block hover:text-sky-600 transition-colors">Доставка и оплата</a>
+                <a href="index.html#news" class="block hover:text-sky-600 transition-colors">Новости</a>
+                <a href="index.html#contact" class="block hover:text-sky-600 transition-colors">Контакты</a>
+                <a href="index.html#contact-form" class="mt-4 block bg-sky-600 text-center hover:bg-sky-700 text-white font-semibold py-2 px-6 rounded-lg transition-all">
+                    Оставить заявку
+                </a>
+            </div>
+        </header>
+
+        <main>
+            <div class="container mx-auto px-6 py-8">
+                <!-- Breadcrumbs -->
+                <nav class="text-sm mb-6" aria-label="Breadcrumb">
+                  <ol class="list-none p-0 inline-flex">
+                    <li class="flex items-center">
+                      <a href="index.html" class="text-slate-500 hover:text-sky-600">Главная</a>
+                      <svg class="fill-current w-3 h-3 mx-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"/></svg>
+                    </li>
+                    <li class="flex items-center">
+                      <a href="category.html" class="text-slate-500 hover:text-sky-600">Пищевая химия</a>
+                      <svg class="fill-current w-3 h-3 mx-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"/></svg>
+                    </li>
+                    <li>
+                      <span class="text-slate-700 font-medium">Лимонная кислота моногидрат</span>
+                    </li>
+                  </ol>
+                </nav>
+
+                <!-- Product Details -->
+                <div class="grid lg:grid-cols-2 gap-12">
+                    <!-- Product Image -->
+                    <div>
+                        <div class="bg-slate-100 rounded-lg p-8 border border-slate-200">
+                             <img src="https://placehold.co/600x600/f1f5f9/cbd5e1?text=Лимонная+кислота" alt="Лимонная кислота моногидрат" class="w-full h-auto object-cover rounded-lg">
+                        </div>
+                    </div>
+                    <!-- Product Info -->
+                    <div>
+                        <h1 class="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Лимонная кислота моногидрат</h1>
+                        <p class="text-slate-600 leading-relaxed mb-6">Лимонная кислота (пищевая добавка E330) — это органическая кислота средней силы, которая в натуральном виде содержится во многих фруктах, особенно в цитрусовых. Представляет собой кристаллический порошок белого цвета, хорошо растворимый в воде и этаноле.</p>
+                         <button id="open-modal-button" class="w-full text-center bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-all inline-block">
+                                Оставить заявку
+                            </button>
+                    </div>
+                </div>
+
+                <!-- Product Description and Specs -->
+                <div class="mt-16">
+                     <div class="border-b border-slate-200">
+                        <h2 class="text-2xl font-bold text-slate-800 py-4">Описание и характеристики</h2>
+                    </div>
+                    <div class="prose max-w-none mt-6">
+                        <h2>Применение</h2>
+                        <p>Лимонная кислота моногидрат широко используется в различных отраслях промышленности:</p>
+                        <ul>
+                            <li><strong>Пищевая промышленность:</strong> в качестве регулятора кислотности, подкислителя, консерванта, стабилизатора цвета и катализатора гидролиза в напитках, кондитерских изделиях, джемах, желе и консервах.</li>
+                            <li><strong>Фармацевтика:</strong> используется как компонент многих лекарственных препаратов, в том числе шипучих таблеток.</li>
+                            <li><strong>Косметология:</strong> применяется в кремах, лосьонах и шампунях для регулирования pH.</li>
+                            <li><strong>Промышленная химия:</strong> для очистки металлических поверхностей от ржавчины и накипи.</li>
+                        </ul>
+
+                        <h2>Характеристики</h2>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-sm text-left text-slate-500">
+                                <thead class="text-xs text-slate-700 uppercase bg-slate-100">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3 rounded-l-lg">Показатель</th>
+                                        <th scope="col" class="px-6 py-3 rounded-r-lg">Значение</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="bg-white border-b border-slate-200">
+                                        <th scope="row" class="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">Химическая формула</th>
+                                        <td class="px-6 py-4">C₆H₈O₇·H₂O</td>
+                                    </tr>
+                                    <tr class="bg-white border-b border-slate-200">
+                                        <th scope="row" class="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">Номер CAS</th>
+                                        <td class="px-6 py-4">5949-29-1</td>
+                                    </tr>
+                                    <tr class="bg-white border-b border-slate-200">
+                                        <th scope="row" class="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">Внешний вид</th>
+                                        <td class="px-6 py-4">Белые кристаллы или порошок</td>
+                                    </tr>
+                                     <tr class="bg-white">
+                                        <th scope="row" class="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">Упаковка</th>
+                                        <td class="px-6 py-4">Многослойные бумажные мешки по 25 кг</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Footer -->
+        <footer id="contact" class="bg-slate-100 border-t border-slate-200">
+            <div class="container mx-auto px-6 py-12">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                    <!-- Column 1: Logo & Info -->
+                    <div class="col-span-1 md:col-span-1">
+                        <h3 class="text-xl font-bold text-slate-900 mb-4">ТЕСТ</h3>
+                        <p class="text-slate-500">Оптовые поставки химического сырья с 2002 года.</p>
+                    </div>
+                    <!-- Column 2: Products -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Продукция</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Пищевая химия</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Бытовая химия</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Сырьё для ЛКМ</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Сырьё для косметологии</a></li>
+                        </ul>
+                    </div>
+                    <!-- Column 3: Company -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Информация</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">О компании</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Оплата и доставка</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Новости</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Контакты</a></li>
+                        </ul>
+                    </div>
+                    <!-- Column 4: Contacts -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Контакты</h4>
+                        <ul class="space-y-2 text-slate-500">
+                            <li><a href="tel:+78007078231" class="hover:text-sky-600">+7 (800) 707-82-31</a></li>
+                            <li><a href="mailto:test@test.ru" class="hover:text-sky-600">test@test.ru</a></li>
+                            <li>г. Москва, проспект Андропова, д. 18 к. 7</li>
+                            <li>Пн-Пт: с 9:00 до 18:00</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="mt-12 border-t border-slate-200 pt-8 text-center text-slate-400">
+                    <p>© ООО ТЕСТ 2024. Все права защищены.</p>
+                </div>
+            </div>
+        </footer>
+
+    </div>
+    <div id="product-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 hidden transition-opacity duration-300">
+        <div class="bg-white rounded-lg shadow-xl p-6 sm:p-8 max-w-lg w-full m-4 transform transition-all duration-300 scale-95 opacity-0" id="modal-content">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center mb-6">
+                 <h2 class="text-2xl font-bold text-slate-900">Заявка на "Лимонная кислота"</h2>
+                 <button id="close-modal-button" class="text-slate-400 hover:text-slate-800 text-3xl leading-none">&times;</button>
+            </div>
+            <!-- Modal Body (Form) -->
+            <form>
+                <input type="hidden" name="product" value="Лимонная кислота моногидрат">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div>
+                        <label for="modal-name" class="block text-sm font-medium text-slate-600 mb-2">Как к вам обращаться*</label>
+                        <input type="text" id="modal-name" name="name" required class="form-input px-4 py-2 block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                    </div>
+                     <div>
+                        <label for="modal-phone" class="block text-sm font-medium text-slate-600 mb-2">Телефон*</label>
+                        <input type="tel" id="modal-phone" name="phone" required class="form-input px-4 py-2 block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                    </div>
+                </div>
+                <div class="mt-6">
+                    <label for="modal-email" class="block text-sm font-medium text-slate-600 mb-2">Email*</label>
+                    <input type="email" id="modal-email" name="email" required class="form-input px-4 py-2 block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                </div>
+                <div class="mt-6">
+                     <label for="modal-message" class="block text-sm font-medium text-slate-600 mb-2">Объем и комментарий</label>
+                     <textarea id="modal-message" name="message" rows="4" class="form-input px-4 py-2 block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50" placeholder="Укажите необходимый объем в кг и детали доставки..."></textarea>
+                </div>
+                <div class="mt-6 flex items-start">
+                    <input type="checkbox" id="modal-agreement" name="agreement" required class="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500 mt-1">
+                    <label for="modal-agreement" class="ml-3 block text-sm text-slate-500">
+                        Я согласен на обработку персональных данных.
+                    </label>
+                </div>
+                <div class="mt-8 text-right">
+                    <button type="submit" class="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-all">
+                        Отправить
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // --- Mobile Menu Script ---
+        document.getElementById('mobile-menu-button').addEventListener('click', function() {
+            document.getElementById('mobile-menu').classList.toggle('hidden');
+        });
+
+        // --- Modal Script ---
+        const modal = document.getElementById('product-modal');
+        const modalContent = document.getElementById('modal-content');
+        const openBtn = document.getElementById('open-modal-button');
+        const closeBtn = document.getElementById('close-modal-button');
+
+        const openModal = () => {
+            modal.classList.remove('hidden');
+            // Trigger reflow to enable transition
+            void modal.offsetWidth;
+            modal.classList.remove('bg-opacity-0');
+            modalContent.classList.remove('scale-95', 'opacity-0');
+        };
+
+        const closeModal = () => {
+            modal.classList.add('bg-opacity-0');
+            modalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300); // Match transition duration
+        };
+
+        openBtn.addEventListener('click', openModal);
+        closeBtn.addEventListener('click', closeModal);
+
+        // Close on overlay click
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+
+        // Close on Escape key press
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
+                closeModal();
+            }
+        });
+
+    </script>
+</body>
+</html>

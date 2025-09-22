@@ -25,8 +25,7 @@ class ReportController extends Controller
     {
         $generatedReports = GeneratedReport::where('organization_id', $organization->id)
             ->orderBy('generated_at', 'desc')
-            ->limit(20)
-            ->get();
+            ->paginate(20);
 
         $scheduledReports = ScheduledReport::where('organization_id', $organization->id)
             ->where('is_active', true)

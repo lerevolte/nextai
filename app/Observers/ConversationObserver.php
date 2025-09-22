@@ -11,29 +11,39 @@ class ConversationObserver
 {
     public function created(Conversation $conversation): void
     {
-        // Проверяем, есть ли активные CRM интеграции для бота
-        $bitrix24Integration = $conversation->bot->crmIntegrations()
-            ->where('type', 'bitrix24')
-            ->wherePivot('is_active', true)
-            ->first();
+        info('conversation created');
 
-        if ($bitrix24Integration) {
-            // Для Битрикс24 с коннектором не нужна задержка
-            // Сразу начинаем синхронизацию
-            $this->syncWithBitrix24Connector($conversation, $bitrix24Integration);
+        // Получаем все активные интеграции для бота
+        $activeIntegrations = $conversation->bot->crmIntegrations()
+            ->wherePivot('is_active', true)
+            ->get();
+
+        if ($activeIntegrations->isEmpty()) {
+            return;
+        }
+
+        // --- ИСПРАВЛЕНИЕ: Логика разделена. Сначала всегда пытаемся создать лид/сделку, потом работаем с коннектором. ---
+
+        // 1. Ставим в очередь задачу на создание лида/контакта для ВСЕХ активных CRM, включая Битрикс24.
+        // Эта задача использует стандартный Bitrix24Provider, который умеет создавать лиды.
+        foreach ($activeIntegrations as $integration) {
+            // Проверяем, нужно ли синхронизировать диалоги для этой конкретной интеграции
+            $pivot = $integration->bots()->where('bot_id', $conversation->bot_id)->first()->pivot;
+            if ($pivot->sync_conversations) {
+                 Log::info("Dispatching SyncConversationToCrm for conversation {$conversation->id} with integration {$integration->id}");
+                 // Запускаем задачу с небольшой задержкой, чтобы успели собраться первые данные
+                 SyncConversationToCrm::dispatch($conversation, $integration, 'create_lead')
+                    ->delay(now()->addSeconds(10));
+            }
         }
         
-        // Для других CRM используем старый подход
-        $otherCrmIntegrations = $conversation->bot->crmIntegrations()
-            ->where('type', '!=', 'bitrix24')
-            ->wherePivot('is_active', true)
-            ->wherePivot('sync_conversations', true)
-            ->exists();
+        // 2. Если есть интеграция с Битрикс24, ДОПОЛНИТЕЛЬНО выполняем логику коннектора для создания чата в "Открытых линиях".
+        $bitrix24Integration = $activeIntegrations->firstWhere('type', 'bitrix24');
 
-        if ($otherCrmIntegrations) {
-            // Запускаем синхронизацию через 5 секунд после создания
-            SyncConversationToCrm::dispatch($conversation, null, 'create_lead')
-                ->delay(now()->addSeconds(5));
+        if ($bitrix24Integration) {
+            info('Bitrix24 integration found, syncing with connector.');
+            // Сразу начинаем синхронизацию для "Открытых линий"
+            $this->syncWithBitrix24Connector($conversation, $bitrix24Integration);
         }
     }
 
@@ -42,30 +52,38 @@ class ConversationObserver
      */
     // public function updated(Conversation $conversation): void
     // {
+    //     info('conversation updated');
     //     // Если изменился статус на "closed", синхронизируем с CRM
     //     if ($conversation->isDirty('status') && $conversation->status === 'closed') {
+    //         info('conversation updated2');
     //         $this->syncIfNeeded($conversation, 'sync');
     //     }
 
     //     // Если добавлена контактная информация
     //     if ($conversation->isDirty(['user_email', 'user_phone', 'user_name'])) {
+    //         info('conversation updated1');
     //         $this->syncIfNeeded($conversation, 'sync');
     //     }
     // }
 
     public function updated(Conversation $conversation)
     {
-        // Проверяем, были ли обновлены контактные данные пользователя.
+        info('conversation updated');
+        // Проверяем, были ли обновлены ключевые контактные данные пользователя.
         if ($conversation->isDirty('user_name') || $conversation->isDirty('user_email') || $conversation->isDirty('user_phone')) {
+            info('conversation user data updated, checking for sync');
             
-            // Убедимся, что имя пользователя не пустое и не "Гость".
+            // Убедимся, что имя пользователя не пустое и не "Гость", прежде чем синхронизировать.
             if (!empty($conversation->user_name) && $conversation->user_name !== 'Гость') {
                 
-                $crmIntegration = $conversation->bot->organization->crmIntegration;
+                $activeIntegrations = $conversation->bot->crmIntegrations()
+                    ->wherePivot('is_active', true)
+                    ->wherePivot('sync_conversations', true)
+                    ->get();
 
-                if ($crmIntegration && $crmIntegration->is_active && !$conversation->crm_deal_id) {
-                    Log::info('Dispatching SyncConversationToCrm job.', ['conversation_id' => $conversation->id]);
-                    // Отправляем задачу на синхронизацию с CRM в очередь.
+                if ($activeIntegrations->isNotEmpty()) {
+                    Log::info('Dispatching SyncConversationToCrm job due to updated user info.', ['conversation_id' => $conversation->id]);
+                    // Отправляем задачу на синхронизацию (обновление данных) в CRM.
                     SyncConversationToCrm::dispatch($conversation);
                 }
             }
@@ -110,35 +128,21 @@ class ConversationObserver
      */
     protected function syncWithBitrix24Connector(Conversation $conversation, $integration): void
     {
+        info('syncWithBitrix24Connector');
         try {
-            // Проверяем, зарегистрирован ли коннектор для бота
-            $bot = $conversation->bot;
-            if (!($bot->metadata['bitrix24_connector_registered'] ?? false)) {
-                Log::info('Bitrix24 connector not registered for bot, registering now', [
-                    'bot_id' => $bot->id
-                ]);
-                
-                // Регистрируем коннектор
-                $provider = new Bitrix24ConnectorProvider($integration);
-                $result = $provider->registerConnector($bot);
-                
-                if (!$result['success']) {
-                    Log::error('Failed to register Bitrix24 connector', [
-                        'bot_id' => $bot->id,
-                        'error' => $result['error'] ?? 'Unknown error'
-                    ]);
-                    return;
-                }
-            }
+            $provider = new Bitrix24ConnectorProvider($integration);
             
-            // Синхронизируем существующие сообщения если есть
+            // Синхронизируем существующие сообщения, если они есть. 
+            // Это создаст чат в открытой линии и отправит в него историю переписки.
             if ($conversation->messages()->exists()) {
-                $provider = new Bitrix24ConnectorProvider($integration);
+                info('syncWithBitrix24Connector: messages exist, syncing now');
                 $provider->syncConversationMessages($conversation);
+            } else {
+                info('syncWithBitrix24Connector: no messages yet, skipping sync.');
             }
             
         } catch (\Exception $e) {
-            Log::error('Failed to sync with Bitrix24 connector', [
+            Log::error('Failed to sync with Bitrix24 connector on conversation creation', [
                 'conversation_id' => $conversation->id,
                 'error' => $e->getMessage()
             ]);

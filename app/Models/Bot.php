@@ -31,6 +31,7 @@ class Bot extends Model
         'human_handoff_enabled',
         'working_hours',
         'settings',
+        'metadata'
     ];
 
     protected $casts = [
@@ -41,6 +42,7 @@ class Bot extends Model
         'human_handoff_enabled' => 'boolean',
         'working_hours' => 'array',
         'settings' => 'array',
+        'metadata' => 'array'
     ];
 
     public function organization(): BelongsTo

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ТЕСТ - Современные Поставки Химического Сырья</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .gradient-text {
+            background: linear-gradient(90deg, #0ea5e9, #4f46e5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .form-input {
+            background-color: #f1f5f9; /* slate-100 */
+            border-color: #cbd5e1; /* slate-300 */
+            color: #1e293b; /* slate-800 */
+        }
+        .form-input:focus {
+            --tw-ring-color: #0ea5e9; /* sky-500 */
+            border-color: #0ea5e9;
+        }
+    </style>
+</head>
+<body class="text-slate-700">
+
+    <!-- App Wrapper -->
+    <div id="app" class="bg-slate-50">
+
+        <!-- Header -->
+        <header class="sticky top-0 z-50 bg-white/80 backdrop-blur-sm border-b border-slate-200">
+            <nav class="container mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <a href="#" class="text-2xl font-bold text-slate-900">
+                        ТЕСТ
+                    </a>
+                    
+                    <!-- Desktop Menu -->
+                    <div class="hidden md:flex items-center space-x-8 text-slate-600">
+                        <a href="#about" class="hover:text-sky-600 transition-colors">О компании</a>
+                        <a href="#products" class="hover:text-sky-600 transition-colors">Продукция</a>
+                        <a href="#delivery" class="hover:text-sky-600 transition-colors">Доставка и оплата</a>
+                        <a href="#news" class="hover:text-sky-600 transition-colors">Новости</a>
+                        <a href="#contact" class="hover:text-sky-600 transition-colors">Контакты</a>
+                    </div>
+
+                    <a href="#contact-form" class="hidden md:block bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 px-6 rounded-lg transition-all">
+                        Оставить заявку
+                    </a>
+
+                    <!-- Mobile Menu Button -->
+                    <button id="mobile-menu-button" class="md:hidden text-slate-700 focus:outline-none">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+                        </svg>
+                    </button>
+                </div>
+            </nav>
+            <!-- Mobile Menu -->
+            <div id="mobile-menu" class="hidden md:hidden bg-white px-6 pb-4 space-y-2">
+                <a href="#about" class="block hover:text-sky-600 transition-colors">О компании</a>
+                <a href="#products" class="block hover:text-sky-600 transition-colors">Продукция</a>
+                <a href="#delivery" class="block hover:text-sky-600 transition-colors">Доставка и оплата</a>
+                <a href="#news" class="block hover:text-sky-600 transition-colors">Новости</a>
+                <a href="#contact" class="block hover:text-sky-600 transition-colors">Контакты</a>
+                <a href="#contact-form" class="mt-4 block bg-sky-600 text-center hover:bg-sky-700 text-white font-semibold py-2 px-6 rounded-lg transition-all">
+                    Оставить заявку
+                </a>
+            </div>
+        </header>
+
+        <main>
+            <!-- Hero Section -->
+            <section class="relative py-20 md:py-32 bg-cover bg-center" style="background-image: url('https://placehold.co/1920x1080/e2e8f0/cbd5e1?text=');">
+                <div class="absolute inset-0 bg-slate-50/50"></div>
+                <div class="container mx-auto px-6 text-center relative z-10">
+                    <h1 class="text-4xl md:text-6xl font-extrabold text-slate-900 leading-tight mb-4">Надёжные поставки химического сырья по всей России</h1>
+                    <p class="text-lg md:text-xl text-slate-700 max-w-3xl mx-auto mb-8">Предлагаем сырьё высшего качества от проверенных производителей с доставкой в кратчайшие сроки.</p>
+                    <a href="#products" class="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-all transform hover:scale-105">
+                        Смотреть каталог
+                    </a>
+                </div>
+            </section>
+
+            <!-- Products Section -->
+            <section id="products" class="py-16 sm:py-24 bg-white">
+                <div class="container mx-auto px-6">
+                    <div class="text-center mb-12">
+                        <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Наша продукция</h2>
+                        <p class="mt-4 text-lg text-slate-500">Категории химического сырья для любых отраслей промышленности.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+                        <!-- Product Card -->
+                        <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-start hover:bg-slate-100 hover:-translate-y-2 transition-all duration-300 border border-slate-200">
+                            <div class="bg-sky-100 p-3 rounded-lg mb-4">
+                               
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Пищевая химия</h3>
+                            <p class="text-slate-500 flex-grow mb-4">Консерванты, кислоты, подсластители и многое другое.</p>
+                            <a href="#" class="font-semibold text-sky-600 hover:text-sky-500">Подробнее →</a>
+                        </div>
+                        <!-- Product Card -->
+                         <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-start hover:bg-slate-100 hover:-translate-y-2 transition-all duration-300 border border-slate-200">
+                            <div class="bg-sky-100 p-3 rounded-lg mb-4">
+                                
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Бытовая химия</h3>
+                            <p class="text-slate-500 flex-grow mb-4">Сырье для производства моющих и чистящих средств.</p>
+                            <a href="#" class="font-semibold text-sky-600 hover:text-sky-500">Подробнее →</a>
+                        </div>
+                        <!-- Product Card -->
+                        <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-start hover:bg-slate-100 hover:-translate-y-2 transition-all duration-300 border border-slate-200">
+                            <div class="bg-sky-100 p-3 rounded-lg mb-4">
+                                
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Сырьё для ЛКМ</h3>
+                            <p class="text-slate-500 flex-grow mb-4">Компоненты для лакокрасочных материалов.</p>
+                            <a href="#" class="font-semibold text-sky-600 hover:text-sky-500">Подробнее →</a>
+                        </div>
+                        <!-- Product Card -->
+                        <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-start hover:bg-slate-100 hover:-translate-y-2 transition-all duration-300 border border-slate-200">
+                            <div class="bg-sky-100 p-3 rounded-lg mb-4">
+                                
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Сырьё для косметологии</h3>
+                            <p class="text-slate-500 flex-grow mb-4">Ингредиенты для косметической продукции.</p>
+                            <a href="#" class="font-semibold text-sky-600 hover:text-sky-500">Подробнее →</a>
+                        </div>
+                         <!-- Add more cards as needed -->
+                    </div>
+                </div>
+            </section>
+            
+            <!-- About Us Section -->
+            <section id="about" class="py-16 sm:py-24 bg-slate-100">
+                <div class="container mx-auto px-6">
+                    <div class="grid lg:grid-cols-2 gap-12 items-center">
+                        <div class="order-2 lg:order-1">
+                            <h2 class="text-3xl md:text-4xl font-bold text-slate-900 mb-6">О компании «ТЕСТ»</h2>
+                            <p class="text-slate-600 mb-6 leading-relaxed">Наша основная цель — установление долгосрочных партнёрских отношений. Мы стремимся предугадать потребности клиентов, обеспечивая лучшие условия по ценообразованию и качеству химического сырья от ведущих отечественных и зарубежных производителей.</p>
+                            <div class="grid sm:grid-cols-2 gap-6 mb-8">
+                                <div class="bg-white p-4 rounded-lg border border-slate-200">
+                                    <span class="text-3xl font-bold gradient-text">> 120</span>
+                                    <p class="text-slate-500">высококвалифицированных специалистов в команде.</p>
+                                </div>
+                                <div class="bg-white p-4 rounded-lg border border-slate-200">
+                                    <span class="text-3xl font-bold gradient-text">> 20 лет</span>
+                                    <p class="text-slate-500">опыта на рынке оптовой торговли химсырьем.</p>
+                                </div>
+                            </div>
+                             <a href="#" class="bg-transparent border-2 border-sky-600 text-sky-600 hover:bg-sky-600 hover:text-white font-semibold py-3 px-8 rounded-lg transition-all">
+                                Подробнее о компании
+                            </a>
+                        </div>
+                        <div class="order-1 lg:order-2">
+                            <img src="https://placehold.co/600x500/f1f5f9/cbd5e1?text=" alt="О компании ТЕСТ" class="rounded-2xl shadow-xl w-full h-auto object-cover">
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Benefits Section -->
+            <section id="delivery" class="py-16 sm:py-24 bg-white">
+                <div class="container mx-auto px-6">
+                    <div class="text-center mb-12">
+                        <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Преимущества партнёрства с нами</h2>
+                        <p class="mt-4 text-lg text-slate-500">Мы гарантируем надежность, качество и выгодные условия.</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                             <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                   <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-users"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Ориентация на клиента</h3>
+                            <p class="text-slate-500">Комплексные решения для удовлетворения потребностей клиентов.</p>
+                        </div>
+                        <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                            <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-check-circle"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Высокое качество</h3>
+                            <p class="text-slate-500">Совершаем отгрузки исключительно от проверенных производителей.</p>
+                        </div>
+                        <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                           <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trending-up"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Адаптация к рынку</h3>
+                            <p class="text-slate-500">Постоянно отслеживаем новинки и тенденции в отрасли.</p>
+                        </div>
+                         <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                            <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-percent"><line x1="19" y1="5" x2="5" y2="19"></line><circle cx="6.5" cy="6.5" r="2.5"></circle><circle cx="17.5" cy="17.5" r="2.5"></circle></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Гибкая система скидок</h3>
+                            <p class="text-slate-500">Выгодные условия для постоянных и оптовых клиентов.</p>
+                        </div>
+                        <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                            <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-award"><circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Богатый опыт</h3>
+                            <p class="text-slate-500">Более 20 лет на рынке оптовых поставок химсырья.</p>
+                        </div>
+                        <!-- Benefit Item -->
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
+                             <div class="flex justify-center mb-4">
+                                <div class="bg-white p-4 rounded-full shadow-sm">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-truck"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                                </div>
+                            </div>
+                            <h3 class="text-xl font-semibold text-slate-800 mb-2">Надежность и логистика</h3>
+                            <p class="text-slate-500">Соблюдаем сроки благодаря складам по всей России.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+          
+
+            <!-- Contact Form Section -->
+            <section id="contact-form" class="py-16 sm:py-24 bg-white">
+                <div class="container mx-auto px-6">
+                    <div class="max-w-3xl mx-auto text-center">
+                        <h2 class="text-3xl md:text-4xl font-bold text-slate-900">Оставьте заявку</h2>
+                        <p class="mt-4 text-lg text-slate-500">Мы свяжемся с вами в ближайшее время для уточнения деталей и подготовки коммерческого предложения.</p>
+                    </div>
+                    <form class="mt-12 max-w-2xl mx-auto">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div>
+                                <label for="name" class="block text-sm font-medium text-slate-600 mb-2">Как к вам обращаться*</label>
+                                <input type="text" id="name" name="name" required class="px-4 py-2 form-input block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                            </div>
+                            <div>
+                                <label for="company" class="block text-sm font-medium text-slate-600 mb-2">Название компании</label>
+                                <input type="text" id="company" name="company" class="px-4 py-2 form-input block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                            </div>
+                             <div>
+                                <label for="email" class="block text-sm font-medium text-slate-600 mb-2">Email*</label>
+                                <input type="email" id="email" name="email" required class="px-4 py-2 form-input block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                            </div>
+                            <div>
+                                <label for="phone" class="block text-sm font-medium text-slate-600 mb-2">Телефон*</label>
+                                <input type="tel" id="phone" name="phone" required class="px-4 py-2 form-input block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50">
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                             <label for="message" class="block text-sm font-medium text-slate-600 mb-2">Продукт, объем и комментарий</label>
+                             <textarea id="message" name="message" rows="4" class="form-input block w-full rounded-md border-transparent focus:ring focus:ring-opacity-50"></textarea>
+                        </div>
+                        <div class="mt-6 flex items-start">
+                            <input type="checkbox" id="agreement" name="agreement" required class="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500 mt-1">
+                            <label for="agreement" class="ml-3 block text-sm text-slate-500">
+                                Я согласен на обработку персональных данных в соответствии с <a href="#" class="font-medium text-sky-600 hover:underline">пользовательским соглашением</a>.
+                            </label>
+                        </div>
+                        <div class="mt-8 text-center">
+                            <button type="submit" class="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-12 rounded-lg text-lg transition-all transform hover:scale-105">
+                                Отправить заявку
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer id="contact" class="bg-slate-100 border-t border-slate-200">
+            <div class="container mx-auto px-6 py-12">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                    <!-- Column 1: Logo & Info -->
+                    <div class="col-span-1 md:col-span-1">
+                        <h3 class="text-xl font-bold text-slate-900 mb-4">ТЕСТ</h3>
+                        <p class="text-slate-500">Оптовые поставки химического сырья с 2002 года.</p>
+                    </div>
+                    <!-- Column 2: Products -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Продукция</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Пищевая химия</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Бытовая химия</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Сырьё для ЛКМ</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Сырьё для косметологии</a></li>
+                        </ul>
+                    </div>
+                    <!-- Column 3: Company -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Информация</h4>
+                        <ul class="space-y-2">
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">О компании</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Оплата и доставка</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Новости</a></li>
+                            <li><a href="#" class="text-slate-500 hover:text-sky-600">Контакты</a></li>
+                        </ul>
+                    </div>
+                    <!-- Column 4: Contacts -->
+                    <div>
+                        <h4 class="font-semibold text-slate-900 mb-4">Контакты</h4>
+                        <ul class="space-y-2 text-slate-500">
+                            <li><a href="tel:+78007078231" class="hover:text-sky-600">+7 (800) 707-82-31</a></li>
+                            <li><a href="mailto:test@test.ru" class="hover:text-sky-600">test@test.ru</a></li>
+                            <li>г. Москва, проспект Андропова, д. 18 к. 7</li>
+                            <li>Пн-Пт: с 9:00 до 18:00</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="mt-12 border-t border-slate-200 pt-8 text-center text-slate-400">
+                    <p>© ООО «ТЕСТ» 2024. Все права защищены.</p>
+                </div>
+            </div>
+        </footer>
+
+    </div>
+
+    <script>
+        document.getElementById('mobile-menu-button').addEventListener('click', function() {
+            document.getElementById('mobile-menu').classList.toggle('hidden');
+        });
+    </script>
+</body>
+</html>
+

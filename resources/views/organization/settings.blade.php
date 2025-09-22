@@ -51,12 +51,86 @@
                 </span>
             </div>
 
+
             <button type="submit" 
                     style="padding: 10px 20px; background: #6366f1; color: white; border: none; border-radius: 5px; cursor: pointer;">
                 Сохранить изменения
             </button>
         </form>
     </div>
+    <div class="bg-white rounded-lg shadow p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">API интеграции</h3>
+        
+        <div class="bg-gray-50 rounded-lg p-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">API ключ организации</label>
+            <div class="flex items-center space-x-3">
+                <input type="text" 
+                       id="api-key-input"
+                       value="{{ $organization->api_key }}" 
+                       readonly
+                       class="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-white font-mono text-sm">
+                
+                <button type="button" 
+                        onclick="copyApiKey()"
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                    Копировать
+                </button>
+                
+                <button type="button"
+                        onclick="regenerateApiKey()"
+                        class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                    Обновить
+                </button>
+            </div>
+            
+            <div class="mt-3 text-sm text-gray-600">
+                <p>Используйте этот ключ для интеграции с внешними системами, например Битрикс24.</p>
+                <p class="mt-1">⚠️ <strong>Важно:</strong> Не делитесь этим ключом публично!</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function copyApiKey() {
+        const input = document.getElementById('api-key-input');
+        input.select();
+        document.execCommand('copy');
+        
+        // Показываем уведомление
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = '✓ Скопировано';
+        button.classList.add('bg-green-600', 'hover:bg-green-700');
+        button.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+        
+        setTimeout(() => {
+            button.textContent = originalText;
+            button.classList.remove('bg-green-600', 'hover:bg-green-700');
+            button.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+        }, 2000);
+    }
+
+    function regenerateApiKey() {
+        if (!confirm('Вы уверены? Все существующие интеграции с этим ключом перестанут работать!')) {
+            return;
+        }
+        
+        fetch('{{ route("organization.regenerate-api-key") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('api-key-input').value = data.api_key;
+                alert('API ключ успешно обновлен');
+            }
+        });
+    }
+    </script>
 
     <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;">
         <h3 style="font-size: 18px; margin-bottom: 15px;">Статистика использования</h3>

@@ -182,6 +182,7 @@ class Bitrix24ConnectorProvider
      */
     public function sendUserMessage(Conversation $conversation, Message $message): array
     {
+        info('sendUserMessage');
         try {
             $bot = $conversation->bot;
             $connectorId = $this->getConnectorIdForBot($bot);
@@ -261,7 +262,7 @@ class Bitrix24ConnectorProvider
                 'message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);
-            
+            info($e->getMessage());
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -374,7 +375,9 @@ class Bitrix24ConnectorProvider
      */
     public function syncConversationMessages(Conversation $conversation): void
     {
+        info('syncConversationMessages');
         try {
+            info('syncConversationMessages1');
             $messages = $conversation->messages()
                 ->orderBy('created_at', 'asc')
                 ->get();
@@ -382,6 +385,7 @@ class Bitrix24ConnectorProvider
             foreach ($messages as $message) {
                 // Пропускаем системные сообщения
                 if ($message->role === 'system') {
+                    info('system skip');
                     continue;
                 }
                 
@@ -393,6 +397,7 @@ class Bitrix24ConnectorProvider
                 // Отправляем только сообщения пользователя
                 // Сообщения бота будут отправлены как ответы оператора
                 if ($message->role === 'user') {
+                    info('user send');
                     $this->sendUserMessage($conversation, $message);
                 }
             }
@@ -403,6 +408,7 @@ class Bitrix24ConnectorProvider
             ]);
             
         } catch (\Exception $e) {
+            info('Failed to sync conversation messages'.$e->getMessage());
             Log::error('Failed to sync conversation messages', [
                 'conversation_id' => $conversation->id,
                 'error' => $e->getMessage(),

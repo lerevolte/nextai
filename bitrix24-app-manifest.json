@@ -1,0 +1,75 @@
+{
+    "code": "chatbot.connector",
+    "version": "1.0.0",
+    "name": {
+        "ru": "Чат-бот коннектор",
+        "en": "Chatbot Connector"
+    },
+    "description": {
+        "ru": "Подключение чат-ботов к открытым линиям Битрикс24. Автоматическое создание лидов и синхронизация диалогов.",
+        "en": "Connect chatbots to Bitrix24 Open Channels. Automatic lead creation and conversation sync."
+    },
+    "icon": "icon.png",
+    "vendor": {
+        "ru": "AI бот",
+        "en": "AI bot"
+    },
+    "label": {
+        "ru": ["чат-бот", "открытые линии", "коннектор", "CRM", "интеграция"],
+        "en": ["chatbot", "open channels", "connector", "CRM", "integration"]
+    },
+    "requirements": {
+        "bitrix24": "21.0.0"
+    },
+    "application": {
+        "handler": "https://ai-bot.site/bitrix24/install",
+        "install": "https://ai-bot.site/bitrix24/install",
+        "uninstall": "https://ai-bot.site/bitrix24/event-handler",
+        "placement": {
+            "CRM_TOOLS": {
+                "handler": "https://ai-bot.site/bitrix24/",
+                "title": {
+                    "ru": "Чат-бот коннектор",
+                    "en": "Chatbot Connector"
+                },
+                "description": {
+                    "ru": "Управление подключениями чат-ботов",
+                    "en": "Manage chatbot connections"
+                }
+            }
+        },
+        "scope": [
+            "imconnector",
+            "imopenlines",
+            "crm",
+            "user"
+        ],
+        "events": {
+            "ONIMCONNECTORMESSAGEADD": "https://yourdomain.com/bitrix24/event-handler",
+            "ONAPPUNINSTALL": "https://ai-bot.site/bitrix24/event-handler"
+        }
+    },
+    "auth": {
+        "type": "authorization_code"
+    },
+    "price": {
+        "ru": 0,
+        "en": 0
+    },
+    "payment": "free",
+    "public": true,
+    "hidden": false,
+    "install_count": 0,
+    "config": {
+        "ru": {
+            "install_instructions": "После установки приложения:\n1. Перейдите в раздел CRM → Инструменты\n2. Найдите 'Чат-бот коннектор'\n3. Зарегистрируйте нужные боты\n4. Подключите их в Контакт-центре",
+            "support_url": "https://ai-bot.site/support",
+            "video_url": ""
+        },
+        "en": {
+            "install_instructions": "After installing the app:\n1. Go to CRM → Tools\n2. Find 'Chatbot Connector'\n3. Register required bots\n4. Connect them in Contact Center",
+            "support_url": "https://ai-bot.site/support",
+            "video_url": ""
+        }
+    }
+}

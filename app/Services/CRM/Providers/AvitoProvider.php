@@ -40,6 +40,7 @@ class AvitoProvider implements CrmProviderInterface
         if (!$this->accessToken || $this->isTokenExpired()) {
             $this->refreshAccessToken();
         }
+    }
 
     /**
      * Обработка webhook от CRM
