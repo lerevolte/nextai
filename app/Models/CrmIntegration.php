@@ -57,6 +57,7 @@ class CrmIntegration extends Model
                 'lead_source',
                 'responsible_user_id',
                 'pipeline_settings',
+                'connector_settings',
                 'is_active'
             ])
             ->withTimestamps();

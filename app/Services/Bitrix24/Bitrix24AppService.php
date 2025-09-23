@@ -22,7 +22,7 @@ class Bitrix24AppService
     
     public function __construct()
     {
-        $this->client = new Client(['timeout' => 30]);
+        $this->client = new Client(['timeout' => 30, 'http_errors' => false,]);
     }
     
     /**
@@ -413,12 +413,16 @@ class Bitrix24AppService
     public function updateAuthTokens(CrmIntegration $integration, string $authId): void
     {
         try {
-            $credentials = $integration->credentials ?? [];
-            $credentials['auth_id'] = $authId;
-            $credentials['auth_updated_at'] = now()->toIso8601String();
-            
-            $integration->update(['credentials' => $credentials]);
-            
+            $existingCredentials = $integration->credentials ?? [];
+
+            $newOAuthCredentials = [];
+            $newOAuthCredentials['auth_id'] = $authId;
+            $newOAuthCredentials['auth_updated_at'] = now()->toIso8601String();
+            $mergedCredentials = array_merge($existingCredentials, $newOAuthCredentials);
+
+            $integration->update([
+                'credentials' => $mergedCredentials
+            ]);
         } catch (\Exception $e) {
             Log::error('Failed to update auth tokens', [
                 'integration_id' => $integration->id,
@@ -493,11 +497,14 @@ class Bitrix24AppService
             $data = json_decode($response->getBody()->getContents(), true);
             
             if (!empty($data['access_token'])) {
-                $credentials['auth_id'] = $data['access_token'];
-                $credentials['refresh_id'] = $data['refresh_token'];
-                $credentials['auth_expires'] = time() + $data['expires_in'];
+
+                $newOAuthCredentials = [];
+                $newOAuthCredentials['auth_id'] = $data['access_token'];
+                $newOAuthCredentials['refresh_id'] = $data['refresh_token'];
+                $newOAuthCredentials['auth_expires'] = time() + $data['expires_in'];
+                $mergedCredentials = array_merge($credentials, $newOAuthCredentials); 
                 
-                $integration->update(['credentials' => $credentials]);
+                $integration->update(['credentials' => $mergedCredentials]);
             }
             
         } catch (\Exception $e) {

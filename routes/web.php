@@ -265,6 +265,16 @@ Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function ()
         ->name('bitrix24.link-api')
         ->middleware(['web']);
 });
+ Route::get('/test', (function(){
+    $integration = \App\Models\CrmIntegration::find(9);
+    $botIntegration = $integration->bots()
+            ->where('bot_id', 1)
+            ->first();
+    dd($botIntegration->pivot);
+    echo $botIntegration->id;
+        // Получаем настройки коннектора из pivot таблицы
+        $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
+}));
 // API роуты
 Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', function (Request $request) {
