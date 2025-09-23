@@ -8,6 +8,7 @@ use App\Models\CrmIntegration;
 use App\Models\Message;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class Bitrix24ConnectorProvider
@@ -27,9 +28,11 @@ class Bitrix24ConnectorProvider
         $this->client = new Client(['timeout' => 30, 'http_errors' => false,]);
         $this->config = $integration->credentials ?? [];
         $this->connectorId = 'chatbot_' . $integration->organization_id . '_' . $integration->id;
+        
         if (isset($this->config['webhook_url'])) {
             $this->webhookUrl = rtrim($this->config['webhook_url'], '/') . '/';
         }
+        
         if (isset($this->config['auth_id']) && isset($this->config['domain'])) {
             $this->accessToken = $this->config['auth_id'];
             $this->refreshToken = $this->config['refresh_id'] ?? null;
@@ -43,7 +46,19 @@ class Bitrix24ConnectorProvider
      */
     public function sendInitialMessage(Conversation $conversation): array
     {
-        info('sendInitialMessage to open line');
+        // Проверяем, не было ли уже отправлено сообщение
+        $cacheKey = "bitrix24_initial_sent_{$conversation->id}";
+        if (Cache::has($cacheKey)) {
+            Log::info('Initial message already sent for conversation', [
+                'conversation_id' => $conversation->id
+            ]);
+            return ['success' => false, 'error' => 'Already sent'];
+        }
+        
+        // Устанавливаем блокировку на 5 минут
+        Cache::put($cacheKey, true, 300);
+        
+        Log::info('sendInitialMessage to open line');
         
         try {
             $bot = $conversation->bot;
@@ -58,17 +73,8 @@ class Bitrix24ConnectorProvider
                 throw new \Exception('Bot not connected to integration');
             }
             
-            // Декодируем JSON настройки коннектора
             $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
-            info('connectorSettings');
-            info($connectorSettings);
             $lineId = $connectorSettings['line_id'] ?? null;
-            
-            Log::info("Connector settings retrieved", [
-                'bot_id' => $bot->id,
-                'connector_settings' => $connectorSettings,
-                'line_id' => $lineId
-            ]);
             
             if (!$lineId) {
                 throw new \Exception('Line ID not configured');
@@ -86,13 +92,22 @@ class Bitrix24ConnectorProvider
                 ],
             ];
 
-            // Формируем первое сообщение
+            // Получаем первое сообщение пользователя или создаем приветственное
+            $firstMessage = $conversation->messages()
+                ->where('role', 'user')
+                ->orderBy('created_at', 'asc')
+                ->first();
+
+            $messageText = $firstMessage ? $firstMessage->content : 
+                          ($bot->welcome_message ?? 'Пользователь начал диалог');
+
+            // Формируем сообщение
             $messageData = [
                 'user' => $userData,
                 'message' => [
-                    'id' => Str::uuid()->toString(),
-                    'date' => now()->timestamp,
-                    'text' => $bot->welcome_message ?? 'Здравствуйте! Чем могу помочь?',
+                    'id' => $firstMessage ? (string)$firstMessage->id : Str::uuid()->toString(),
+                    'date' => $firstMessage ? $firstMessage->created_at->timestamp : now()->timestamp,
+                    'text' => $messageText,
                 ],
                 'chat' => [
                     'id' => 'chat_' . $conversation->id,
@@ -141,6 +156,9 @@ class Bitrix24ConnectorProvider
             ];
 
         } catch (\Exception $e) {
+            // Убираем блокировку при ошибке
+            Cache::forget($cacheKey);
+            
             Log::error('Failed to send initial message to Bitrix24', [
                 'conversation_id' => $conversation->id,
                 'error' => $e->getMessage(),
@@ -159,93 +177,30 @@ class Bitrix24ConnectorProvider
      */
     public function sendUserMessage(Conversation $conversation, Message $message): array
     {
-        info('sendUserMessage');
-        
         try {
+            // Проверяем, не отправляли ли это сообщение уже
+            $cacheKey = "bitrix24_msg_sent_{$message->id}";
+            if (Cache::has($cacheKey)) {
+                return ['success' => true, 'cached' => true];
+            }
+            
             $bot = $conversation->bot;
-            $connectorId = $this->getConnectorIdForBot($bot);
             
-            // Получаем настройки коннектора
-            $botIntegration = $this->integration->bots()
-                ->where('bot_id', $bot->id)
-                ->first();
-            
-            if (!$botIntegration) {
-                throw new \Exception('Bot not connected to integration');
+            if ($message->role === 'assistant') {
+                // Сообщения бота отправляем через API бота
+                $result = $this->sendAsBotMessage($conversation, $message);
+            } else {
+                // Сообщения пользователя отправляем через коннектор
+                $result = $this->sendAsUserMessage($conversation, $message);
             }
             
-            $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
-            $lineId = $connectorSettings['line_id'] ?? null;
+            // Кешируем успешную отправку
+            if ($result['success']) {
+                Cache::put($cacheKey, true, 3600);
+            }
             
-            if (!$lineId) {
-                // Если линия не настроена, отправляем первое сообщение
-                $initResult = $this->sendInitialMessage($conversation);
-                if (!$initResult['success']) {
-                    throw new \Exception('Failed to initialize chat: ' . ($initResult['error'] ?? 'Unknown error'));
-                }
-                $lineId = $initResult['line_id'];
-            }
-
-            // Определяем отправителя
-            $sender = match($message->role) {
-                'user' => [
-                    'id' => $conversation->external_id ?? 'user_' . $conversation->id,
-                    'name' => $conversation->user_name ?? 'Гость',
-                ],
-                'assistant' => [
-                    'id' => 'bot_' . $bot->id,
-                    'name' => $bot->name,
-                ],
-                default => [
-                    'id' => 'system',
-                    'name' => 'Система',
-                ],
-            };
-
-            // Формируем данные сообщения
-            $messageData = [
-                'user' => $sender,
-                'message' => [
-                    'id' => (string)$message->id,
-                    'date' => $message->created_at->timestamp,
-                    'text' => $message->content,
-                ],
-                'chat' => [
-                    'id' => 'chat_' . $conversation->id,
-                ],
-            ];
-
-            // Отправляем сообщение
-            $result = $this->makeRequest('imconnector.send.messages', [
-                'CONNECTOR' => $connectorId,
-                'LINE' => $lineId,
-                'MESSAGES' => [$messageData],
-            ]);
-
-            if (empty($result['result'])) {
-                throw new \Exception('Failed to send message to Bitrix24');
-            }
-
-            // Сохраняем ID сообщения в Битрикс24
-            if (!empty($result['result']['MESSAGES'][0])) {
-                $message->update([
-                    'metadata' => array_merge($message->metadata ?? [], [
-                        'bitrix24_message_id' => $result['result']['MESSAGES'][0],
-                    ])
-                ]);
-            }
-
-            Log::info('Message sent to Bitrix24', [
-                'conversation_id' => $conversation->id,
-                'message_id' => $message->id,
-                'connector_id' => $connectorId,
-            ]);
-
-            return [
-                'success' => true,
-                'bitrix24_message_id' => $result['result']['MESSAGES'][0] ?? null,
-            ];
-
+            return $result;
+            
         } catch (\Exception $e) {
             Log::error('Failed to send message to Bitrix24', [
                 'conversation_id' => $conversation->id,
@@ -258,6 +213,197 @@ class Bitrix24ConnectorProvider
                 'error' => $e->getMessage(),
             ];
         }
+    }
+
+    /**
+     * Отправка как сообщение бота
+     */
+    protected function sendAsBotMessage(Conversation $conversation, Message $message): array
+    {
+        $bot = $conversation->bot;
+        $botId = $bot->metadata['bitrix24_bot_id'] ?? null;
+        
+        if (!$botId) {
+            Log::warning('Bitrix24 bot not registered, sending as system message');
+            return $this->sendAsSystemMessage($conversation, $message);
+        }
+
+        // ИСПРАВЛЕНИЕ: Для открытых линий используем другой подход
+        // Получаем line_id из настроек коннектора
+        $botIntegration = $this->integration->bots()
+            ->where('bot_id', $bot->id)
+            ->first();
+        
+        if (!$botIntegration) {
+            throw new \Exception('Bot not connected to integration');
+        }
+        
+        $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
+        $lineId = $connectorSettings['line_id'] ?? null;
+        
+        if (!$lineId) {
+            throw new \Exception('Line ID not configured');
+        }
+
+        // Отправляем через открытые линии, а не через API бота
+        $result = $this->makeRequest('imopenlines.bot.message.send', [
+            'CHAT_ID' => str_replace('chat_', '', $conversation->metadata['bitrix24_chat_id'] ?? $conversation->id),
+            'BOT_ID' => $botId,
+            'MESSAGE' => $message->content,
+        ]);
+
+        // Если этот метод не работает, используем альтернативный подход
+        if (empty($result['result'])) {
+            // Отправляем как системное сообщение с префиксом бота
+            return $this->sendAsSystemMessage($conversation, $message);
+        }
+
+        $message->update([
+            'metadata' => array_merge($message->metadata ?? [], [
+                'bitrix24_bot_message_id' => $result['result'],
+                'bitrix24_sent_as' => 'openline_bot',
+                'bitrix24_sent_at' => now()->toIso8601String(),
+            ])
+        ]);
+
+        return [
+            'success' => !empty($result['result']),
+            'message_id' => $result['result'] ?? null,
+        ];
+    }
+
+    protected function sendAsUserMessage(Conversation $conversation, Message $message): array
+    {
+        Log::info('sendAsUserMessage to Bitrix24', [
+            'message_id' => $message->id,
+            'role' => $message->role
+        ]);
+        
+        $bot = $conversation->bot;
+        $connectorId = $this->getConnectorIdForBot($bot);
+        
+        // Получаем настройки коннектора
+        $botIntegration = $this->integration->bots()
+            ->where('bot_id', $bot->id)
+            ->first();
+        
+        if (!$botIntegration) {
+            throw new \Exception('Bot not connected to integration');
+        }
+        
+        $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
+        $lineId = $connectorSettings['line_id'] ?? null;
+        
+        if (!$lineId) {
+            // Если линия не настроена, пытаемся отправить первое сообщение
+            if ($message->role === 'user') {
+                $initResult = $this->sendInitialMessage($conversation);
+                if (!$initResult['success']) {
+                    throw new \Exception('Failed to initialize chat: ' . ($initResult['error'] ?? 'Unknown error'));
+                }
+                $lineId = $initResult['line_id'];
+            } else {
+                throw new \Exception('Line ID not configured and message is not from user');
+            }
+        }
+
+        // Только для пользователя и системы - НЕ для assistant
+        $sender = [
+            'id' => $conversation->external_id ?? 'user_' . $conversation->id,
+            'name' => $conversation->user_name ?? 'Гость',
+        ];
+
+        // Формируем данные сообщения
+        $messageData = [
+            'user' => $sender,
+            'message' => [
+                'id' => (string)$message->id,
+                'date' => $message->created_at->timestamp,
+                'text' => $message->content,
+            ],
+            'chat' => [
+                'id' => 'chat_' . $conversation->id,
+            ],
+        ];
+
+        // Отправляем сообщение
+        $result = $this->makeRequest('imconnector.send.messages', [
+            'CONNECTOR' => $connectorId,
+            'LINE' => $lineId,
+            'MESSAGES' => [$messageData],
+        ]);
+
+        if (empty($result['result'])) {
+            throw new \Exception('Failed to send message to Bitrix24');
+        }
+
+        // Сохраняем ID сообщения в Битрикс24
+        if (!empty($result['result']['MESSAGES'][0])) {
+            $message->update([
+                'metadata' => array_merge($message->metadata ?? [], [
+                    'bitrix24_message_id' => $result['result']['MESSAGES'][0],
+                    'bitrix24_sent_at' => now()->toIso8601String(),
+                ])
+            ]);
+        }
+
+        Log::info('User message sent to Bitrix24', [
+            'conversation_id' => $conversation->id,
+            'message_id' => $message->id,
+            'connector_id' => $connectorId,
+        ]);
+
+        return [
+            'success' => true,
+            'bitrix24_message_id' => $result['result']['MESSAGES'][0] ?? null,
+        ];
+    }
+
+    /**
+     * Fallback - отправляем как системное сообщение с префиксом
+     */
+    protected function sendAsSystemMessage(Conversation $conversation, Message $message): array
+    {
+        // Создаем копию сообщения с префиксом бота
+        $botName = $conversation->bot->name;
+        $messageWithPrefix = "🤖 {$botName}: {$message->content}";
+        
+        // Отправляем через коннектор как обычное сообщение
+        $bot = $conversation->bot;
+        $connectorId = $this->getConnectorIdForBot($bot);
+        
+        $botIntegration = $this->integration->bots()
+            ->where('bot_id', $bot->id)
+            ->first();
+        
+        $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
+        $lineId = $connectorSettings['line_id'] ?? null;
+
+        $messageData = [
+            'user' => [
+                'id' => $conversation->external_id ?? 'user_' . $conversation->id,
+                'name' => $conversation->user_name ?? 'Гость',
+            ],
+            'message' => [
+                'id' => (string)$message->id . '_bot',
+                'date' => $message->created_at->timestamp,
+                'text' => $messageWithPrefix, // С префиксом бота
+            ],
+            'chat' => [
+                'id' => 'chat_' . $conversation->id,
+            ],
+        ];
+
+        $result = $this->makeRequest('imconnector.send.messages', [
+            'CONNECTOR' => $connectorId,
+            'LINE' => $lineId,
+            'MESSAGES' => [$messageData],
+        ]);
+
+        return [
+            'success' => !empty($result['result']),
+            'message_id' => $result['result']['MESSAGES'][0] ?? null,
+        ];
     }
 
     /**
@@ -279,13 +425,28 @@ class Bitrix24ConnectorProvider
                     continue;
                 }
 
+                // Проверяем, не создавали ли мы уже это сообщение
+                $bitrix24MessageId = $messageData['message']['id'] ?? null;
+                if ($bitrix24MessageId) {
+                    $existingMessage = $conversation->messages()
+                        ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
+                        ->first();
+                    
+                    if ($existingMessage) {
+                        Log::info('Message already exists, skipping', [
+                            'bitrix24_message_id' => $bitrix24MessageId
+                        ]);
+                        continue;
+                    }
+                }
+
                 // Сохраняем сообщение от оператора
                 $message = $conversation->messages()->create([
                     'role' => 'operator',
                     'content' => $messageData['message']['text'] ?? '',
                     'metadata' => [
                         'from_bitrix24' => true,
-                        'bitrix24_message_id' => $messageData['message']['id'] ?? null,
+                        'bitrix24_message_id' => $bitrix24MessageId,
                         'bitrix24_user_id' => $messageData['user']['id'] ?? null,
                         'operator_name' => $messageData['user']['name'] ?? 'Оператор',
                     ]
@@ -302,7 +463,7 @@ class Bitrix24ConnectorProvider
                     $conversation->update(['status' => 'waiting_operator']);
                 }
 
-                Log::info('Operator message received from Bitrix24', [
+                Log::info('Operator message processed', [
                     'conversation_id' => $conversation->id,
                     'message_id' => $message->id,
                 ]);
@@ -381,12 +542,9 @@ class Bitrix24ConnectorProvider
         try {
             $response = $this->client->post($url, ['json' => $params]);
             $result = json_decode($response->getBody()->getContents(), true);
-            info('bitrix24 result');
-            info($result);
+            
             if (isset($result['error']) && $result['error'] === 'expired_token') {
-                info('refreshToken');
                 if ($this->refreshToken) {
-                    info($this->refreshToken);
                     $this->refreshAccessToken();
                     $params['auth'] = $this->accessToken;
                     $retryUrl = $this->oauthRestUrl . $method;
@@ -405,12 +563,17 @@ class Bitrix24ConnectorProvider
             }
             return $result;
         } catch (\Exception $e) {
-            Log::error('Bitrix24 ConnectorProvider API request failed', ['method' => $method, 'error' => $e->getMessage()]);
+            Log::error('Bitrix24 ConnectorProvider API request failed', [
+                'method' => $method, 
+                'error' => $e->getMessage()
+            ]);
             throw $e;
         }
     }
 
-    // --- ИСПРАВЛЕНИЕ: Добавлен метод refreshAccessToken ---
+    /**
+     * Обновление access токена
+     */
     protected function refreshAccessToken(): void
     {
         try {
@@ -439,7 +602,10 @@ class Bitrix24ConnectorProvider
                 throw new \Exception('Failed to get new access token from refresh token response.');
             }
         } catch (\Exception $e) {
-            Log::error('Bitrix24 token refresh failed in ConnectorProvider', ['integration_id' => $this->integration->id, 'error' => $e->getMessage()]);
+            Log::error('Bitrix24 token refresh failed in ConnectorProvider', [
+                'integration_id' => $this->integration->id, 
+                'error' => $e->getMessage()
+            ]);
             $this->integration->update(['is_active' => false]);
             throw $e;
         }

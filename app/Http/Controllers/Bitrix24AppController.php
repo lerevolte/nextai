@@ -627,7 +627,8 @@ class Bitrix24AppController extends Controller
             
             Log::info('Bitrix24 event received', [
                 'event' => $event,
-                'domain' => $auth['domain'] ?? null,
+                'data' => $data,
+                'auth_domain' => $auth['domain'] ?? null,
             ]);
             
             // Находим интеграцию по домену
@@ -648,6 +649,10 @@ class Bitrix24AppController extends Controller
                     $this->appService->handleConnectorMessage($integration, $data);
                     break;
                     
+                case 'ONIMBOTMESSAGEADD': // ДОБАВИТЬ обработку сообщений к боту
+                    $this->handleBotMessage($integration, $data);
+                    break;
+                    
                 case 'ONAPPUNINSTALL':
                     $this->handleAppUninstall($integration);
                     break;
@@ -662,9 +667,96 @@ class Bitrix24AppController extends Controller
             Log::error('Event handler error', [
                 'error' => $e->getMessage(),
                 'event' => $request->input('event'),
+                'data' => $request->all()
             ]);
             
             return response('OK');
+        }
+    }
+
+    /**
+     * Обработка сообщений к боту
+     */
+    protected function handleBotMessage(CrmIntegration $integration, array $data): void
+    {
+        try {
+            $botId = $data['BOT']['ID'] ?? null;
+            $message = $data['MESSAGE'] ?? [];
+            $user = $data['USER'] ?? [];
+            $dialogId = $data['DIALOG_ID'] ?? null;
+
+            Log::info('Bot message received from operator', [
+                'bot_id' => $botId,
+                'dialog_id' => $dialogId,
+                'message' => $message['TEXT'] ?? '',
+                'user_id' => $user['ID'] ?? null
+            ]);
+
+            // Найти бота по bitrix24_bot_id
+            $bot = Bot::where('metadata->bitrix24_bot_id', $botId)->first();
+            
+            if (!$bot) {
+                Log::warning('Bot not found for message', ['bitrix24_bot_id' => $botId]);
+                return;
+            }
+
+            // Найти диалог по chat_id
+            $conversation = Conversation::where('metadata->bitrix24_chat_id', 'chat_' . $dialogId)
+                ->orWhere('metadata->bitrix24_chat_id', $dialogId)
+                ->first();
+
+            if (!$conversation) {
+                Log::warning('Conversation not found for bot message', [
+                    'dialog_id' => $dialogId,
+                    'bot_id' => $bot->id
+                ]);
+                return;
+            }
+
+            // Проверяем, не создавали ли мы уже это сообщение
+            $bitrix24MessageId = $message['ID'] ?? null;
+            if ($bitrix24MessageId) {
+                $existingMessage = $conversation->messages()
+                    ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
+                    ->first();
+                
+                if ($existingMessage) {
+                    Log::info('Message already exists, skipping', [
+                        'bitrix24_message_id' => $bitrix24MessageId
+                    ]);
+                    return;
+                }
+            }
+
+            // Создаем сообщение от оператора
+            $newMessage = $conversation->messages()->create([
+                'role' => 'operator',
+                'content' => $message['TEXT'] ?? '',
+                'metadata' => [
+                    'from_bitrix24' => true,
+                    'bitrix24_message_id' => $bitrix24MessageId,
+                    'bitrix24_user_id' => $user['ID'] ?? null,
+                    'operator_name' => $user['NAME'] ?? 'Оператор',
+                ]
+            ]);
+
+            // Обновляем диалог
+            $conversation->update([
+                'status' => 'waiting_operator',
+                'last_message_at' => now(),
+            ]);
+            $conversation->increment('messages_count');
+
+            Log::info('Operator message processed from bot dialog', [
+                'conversation_id' => $conversation->id,
+                'message_id' => $newMessage->id,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to handle bot message', [
+                'error' => $e->getMessage(),
+                'data' => $data,
+            ]);
         }
     }
     
@@ -698,6 +790,179 @@ class Bitrix24AppController extends Controller
                 'integration_id' => $integration->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Обработчик сообщений для чат-бота
+     */
+    public function botHandler(Request $request)
+    {
+        try {
+            $data = $request->all();
+            $botId = $data['data']['BOT']['ID'] ?? null;
+            $message = $data['data']['MESSAGE'] ?? [];
+            $user = $data['data']['USER'] ?? [];
+
+            Log::info('Bot message received', [
+                'bot_id' => $botId,
+                'message' => $message['TEXT'] ?? '',
+                'user_id' => $user['ID'] ?? null
+            ]);
+
+            // Найти бота по bitrix24_bot_id
+            $bot = Bot::where('metadata->bitrix24_bot_id', $botId)->first();
+            
+            if (!$bot) {
+                Log::warning('Bot not found for Bitrix24 bot ID', ['bitrix24_bot_id' => $botId]);
+                return response('OK');
+            }
+
+            // Найти или создать диалог
+            $conversation = $this->findOrCreateConversationFromBot($bot, $user, $message);
+            
+            // Создать сообщение пользователя
+            $userMessage = $conversation->messages()->create([
+                'role' => 'user',
+                'content' => $message['TEXT'] ?? '',
+                'metadata' => [
+                    'from_bitrix24' => true,
+                    'bitrix24_message_id' => $message['ID'] ?? null,
+                    'bitrix24_user_id' => $user['ID'] ?? null,
+                ]
+            ]);
+
+            // Генерируем ответ бота
+            $aiService = app(\App\Services\AIService::class);
+            $response = $aiService->generateResponse($bot, $conversation, $message['TEXT'] ?? '');
+
+            // Отправляем ответ через API бота
+            $integration = $bot->crmIntegrations()->where('type', 'bitrix24')->first();
+            $this->sendBotMessage($integration, $botId, $message['CHAT_ID'], $response);
+
+            return response('OK');
+
+        } catch (\Exception $e) {
+            Log::error('Bot handler error', [
+                'error' => $e->getMessage(),
+                'data' => $request->all()
+            ]);
+            return response('OK');
+        }
+    }
+
+    /**
+     * Отправка сообщения от имени бота
+     */
+    protected function sendBotMessage(CrmIntegration $integration, string $botId, string $chatId, string $message): void
+    {
+        try {
+            $this->makeRequest($integration, 'imbot.message.add', [
+                'BOT_ID' => $botId,
+                'DIALOG_ID' => $chatId,
+                'MESSAGE' => $message,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send bot message', [
+                'bot_id' => $botId,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Регистрация чат-бота
+     */
+    public function registerBot(Request $request)
+    {
+        try {
+            $request->validate([
+                'bot_id' => 'required|integer',
+                'domain' => 'required|string',
+                'auth_id' => 'required|string',
+            ]);
+
+            $bot = Bot::find($request->bot_id);
+            if (!$bot) {
+                return response()->json(['success' => false, 'error' => 'Bot not found'], 404);
+            }
+
+            // Находим интеграцию
+            $integration = CrmIntegration::where('type', 'bitrix24')
+                ->where('settings->domain', $request->domain)
+                ->first();
+
+            if (!$integration) {
+                return response()->json(['success' => false, 'error' => 'Integration not found'], 404);
+            }
+
+            // Проверяем доступ
+            if ($bot->organization_id !== $integration->organization_id) {
+                return response()->json(['success' => false, 'error' => 'Access denied'], 403);
+            }
+
+            // Обновляем токены
+            $this->appService->updateAuthTokens($integration, $request->auth_id);
+
+            // Регистрируем чат-бота
+            $result = $this->appService->registerChatBot($integration, $bot);
+
+            return response()->json($result);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to register bot via API', [
+                'error' => $e->getMessage(),
+                'request' => $request->all(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Приветственное сообщение бота
+     */
+    public function botWelcome(Request $request)
+    {
+        // Обработка приветственного сообщения
+        return response('OK');
+    }
+
+    /**
+     * Удаление бота
+     */
+    public function botDelete(Request $request)
+    {
+        try {
+            $data = $request->all();
+            $botId = $data['data']['BOT']['ID'] ?? null;
+
+            // Найти бота и удалить метаданные
+            $bot = Bot::where('metadata->bitrix24_bot_id', $botId)->first();
+            if ($bot) {
+                $metadata = $bot->metadata ?? [];
+                unset($metadata['bitrix24_bot_id']);
+                unset($metadata['bitrix24_bot_registered_at']);
+                
+                $bot->update(['metadata' => $metadata]);
+                
+                Log::info('Bitrix24 bot deleted', [
+                    'bot_id' => $bot->id,
+                    'bitrix24_bot_id' => $botId
+                ]);
+            }
+
+            return response('OK');
+
+        } catch (\Exception $e) {
+            Log::error('Bot delete handler error', [
+                'error' => $e->getMessage(),
+                'data' => $request->all()
+            ]);
+            return response('OK');
         }
     }
     

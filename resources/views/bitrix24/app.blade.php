@@ -251,9 +251,18 @@
                             $connector = collect($connectors)->firstWhere('bot_id', $bot->id);
                         @endphp
                         
+
                         <div class="bot-card">
                             <div class="bot-info">
                                 <div class="bot-name">{{ $bot->name }}</div>
+                                @if(isset($bot->metadata['bitrix24_bot_id']))
+                                    <span class="badge badge-success">Чат-бот зарегистрирован</span>
+                                    <p>ID бота: {{ $bot->metadata['bitrix24_bot_id'] }}</p>
+                                @else
+                                    <button onclick="registerBot({{ $bot->id }})" class="btn btn-primary">
+                                        Зарегистрировать чат-бота
+                                    </button>
+                                @endif
                                 @if($isRegistered)
                                     <div class="bot-status registered">
                                         ✅ Коннектор зарегистрирован
@@ -300,6 +309,31 @@
                 </div>
             @endif
         </div>
+
+        <script>
+        function registerBot(botId) {
+            fetch('/bitrix24/register-bot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    bot_id: botId,
+                    auth_id: '{{ $authId }}',
+                    domain: '{{ $domain }}'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Чат-бот успешно зарегистрирован!');
+                    location.reload();
+                } else {
+                    alert('Ошибка: ' + data.error);
+                }
+            });
+        }
+        </script>
         
         <div class="section">
             <h2>Инструкция по подключению</h2>

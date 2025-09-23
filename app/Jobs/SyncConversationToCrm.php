@@ -11,6 +11,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class SyncConversationToCrm implements ShouldQueue
 {
@@ -45,6 +46,23 @@ class SyncConversationToCrm implements ShouldQueue
      */
     public function handle(CrmService $crmService): void
     {
+        if ($this->action === 'create_lead' && $this->conversation->crm_lead_id) {
+            Log::info('Lead already exists, skipping sync', [
+                'conversation_id' => $this->conversation->id,
+                'lead_id' => $this->conversation->crm_lead_id
+            ]);
+            return;
+        }
+
+        // Проверяем блокировку на уровне Job
+        $lockKey = "crm_sync_job_{$this->conversation->id}_{$this->action}";
+        if (Cache::has($lockKey)) {
+            Log::info('Sync job already running', ['conversation_id' => $this->conversation->id]);
+            return;
+        }
+        
+        Cache::put($lockKey, true, 300);
+
         try {
             Log::info('Starting CRM sync', [
                 'conversation_id' => $this->conversation->id,
@@ -81,6 +99,8 @@ class SyncConversationToCrm implements ShouldQueue
             if ($this->attempts() < $this->tries) {
                 $this->release(60 * $this->attempts()); // Увеличиваем задержку с каждой попыткой
             }
+        } finally {
+            Cache::forget($lockKey);
         }
     }
 

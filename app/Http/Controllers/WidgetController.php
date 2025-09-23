@@ -20,7 +20,6 @@ class WidgetController extends Controller
     {
         $this->aiService = $aiService;
     }
-
     public function show(Bot $bot)
     {
         if (!$bot->is_active) {
@@ -61,41 +60,82 @@ class WidgetController extends Controller
         $conversation = null;
         $userInfo = $request->input('user_info', []);
 
-        // Пытаемся найти существующий диалог, только если session_id был предоставлен
+        // Пытаемся найти существующий АКТИВНЫЙ диалог
         if ($sessionId) {
             $conversation = Conversation::where('external_id', $sessionId)
                 ->where('bot_id', $bot->id)
                 ->where('channel_id', $channel->id)
-                ->where('status', 'active')
+                ->where('status', 'active') // Только активные диалоги
                 ->first();
+                
+            Log::info('Looking for existing conversation', [
+                'session_id' => $sessionId,
+                'bot_id' => $bot->id,
+                'channel_id' => $channel->id,
+                'found' => $conversation ? true : false
+            ]);
         }
 
-        // Если диалог не найден, это означает, что нам нужен полный сброс.
-        // Создаем новый диалог с новым ID и сбрасываем информацию о пользователе.
+        // Если диалог не найден, создаем новый
         if (!$conversation) {
-            $sessionId = Str::uuid()->toString(); // Генерируем новый ID
+            // Если session_id не был предоставлен, генерируем новый
+            if (!$sessionId) {
+                $sessionId = Str::uuid()->toString();
+            }
             
-            // При сбросе мы принудительно создаем диалог без данных пользователя,
-            // чтобы форма сбора контактов появилась снова.
+            Log::info('Creating new conversation', [
+                'session_id' => $sessionId,
+                'bot_id' => $bot->id,
+                'user_info' => $userInfo
+            ]);
+            
             $conversation = Conversation::create([
                 'bot_id' => $bot->id,
                 'channel_id' => $channel->id,
                 'external_id' => $sessionId,
                 'status' => 'active',
-                'user_name' => null,
-                'user_email' => null,
-                'user_phone' => null,
-                'user_data' => [],
+                'user_name' => $userInfo['name'] ?? null,
+                'user_email' => $userInfo['email'] ?? null,
+                'user_phone' => $userInfo['phone'] ?? null,
+                'user_data' => $userInfo,
             ]);
+            
+            // Создаем приветственное сообщение если есть
+            if ($bot->welcome_message) {
+                $conversation->messages()->create([
+                    'role' => 'assistant',
+                    'content' => $bot->welcome_message,
+                ]);
+                $conversation->increment('messages_count');
+            }
+            
         } else {
-            // Диалог найден. Проверяем, нужно ли обновить контактные данные.
-            // Это происходит, когда пользователь сначала общается анонимно, а потом заполняет форму.
+            // Диалог найден. Обновляем контактные данные если нужно
+            $needsUpdate = false;
+            $updateData = [];
+            
             if (!empty($userInfo['name']) && empty($conversation->user_name)) {
-                $conversation->update([
-                    'user_name' => $userInfo['name'],
-                    'user_email' => $userInfo['email'] ?? $conversation->user_email,
-                    'user_phone' => $userInfo['phone'] ?? $conversation->user_phone,
-                    'user_data' => array_merge($conversation->user_data ?? [], $userInfo),
+                $updateData['user_name'] = $userInfo['name'];
+                $needsUpdate = true;
+            }
+            
+            if (!empty($userInfo['email']) && empty($conversation->user_email)) {
+                $updateData['user_email'] = $userInfo['email'];
+                $needsUpdate = true;
+            }
+            
+            if (!empty($userInfo['phone']) && empty($conversation->user_phone)) {
+                $updateData['user_phone'] = $userInfo['phone'];
+                $needsUpdate = true;
+            }
+            
+            if ($needsUpdate) {
+                $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
+                $conversation->update($updateData);
+                
+                Log::info('Updated conversation user data', [
+                    'conversation_id' => $conversation->id,
+                    'updates' => $updateData
                 ]);
             }
         }
@@ -151,7 +191,7 @@ class WidgetController extends Controller
             return response()->json(['error' => 'Channel not available'], 404);
         }
         
-        // Находим активный диалог. Он должен был быть создан на этапе initialize().
+        // Находим активный диалог
         $conversation = Conversation::where('bot_id', $bot->id)
             ->where('channel_id', $channel->id)
             ->where('external_id', $request->session_id)
@@ -159,8 +199,53 @@ class WidgetController extends Controller
             ->first();
             
         if (!$conversation) {
-            Log::error('Conversation not found for session', ['session_id' => $request->session_id]);
-            return response()->json(['error' => 'Conversation not found. Please re-initialize.'], 404);
+            Log::error('Conversation not found for session', [
+                'session_id' => $request->session_id,
+                'bot_id' => $bot->id,
+                'channel_id' => $channel->id
+            ]);
+            
+            // Пытаемся найти любой диалог с этим session_id (возможно закрытый)
+            $anyConversation = Conversation::where('bot_id', $bot->id)
+                ->where('channel_id', $channel->id)
+                ->where('external_id', $request->session_id)
+                ->first();
+                
+            if ($anyConversation) {
+                Log::info('Found closed conversation, reopening', [
+                    'conversation_id' => $anyConversation->id,
+                    'status' => $anyConversation->status
+                ]);
+                
+                // Переоткрываем диалог
+                $anyConversation->update(['status' => 'active']);
+                $conversation = $anyConversation;
+            } else {
+                return response()->json(['error' => 'Conversation not found. Please re-initialize.'], 404);
+            }
+        }
+
+        // Обновляем пользовательские данные если переданы
+        $userInfo = $request->input('user_info');
+        if ($userInfo && (!$conversation->user_name || !$conversation->user_email)) {
+            $updateData = [];
+            
+            if (!empty($userInfo['name']) && !$conversation->user_name) {
+                $updateData['user_name'] = $userInfo['name'];
+            }
+            
+            if (!empty($userInfo['email']) && !$conversation->user_email) {
+                $updateData['user_email'] = $userInfo['email'];
+            }
+            
+            if (!empty($userInfo['phone']) && !$conversation->user_phone) {
+                $updateData['user_phone'] = $userInfo['phone'];
+            }
+            
+            if (!empty($updateData)) {
+                $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
+                $conversation->update($updateData);
+            }
         }
 
         DB::beginTransaction();
@@ -236,6 +321,11 @@ class WidgetController extends Controller
             $conversation->update([
                 'status' => 'closed',
                 'closed_at' => now(),
+            ]);
+            
+            Log::info('Conversation ended via widget', [
+                'conversation_id' => $conversation->id,
+                'session_id' => $request->session_id
             ]);
         }
 

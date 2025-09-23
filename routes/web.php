@@ -264,6 +264,15 @@ Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function ()
     Route::post('/link-api', [App\Http\Controllers\Bitrix24AppController::class, 'linkByApiKey'])
         ->name('bitrix24.link-api')
         ->middleware(['web']);
+
+    Route::post('/register-bot', [App\Http\Controllers\Bitrix24AppController::class, 'registerBot'])
+        ->name('bitrix24.register-bot');
+    Route::post('/bot-handler', [App\Http\Controllers\Bitrix24AppController::class, 'botHandler'])
+        ->name('bitrix24.bot-handler');
+    Route::post('/bot-welcome', [App\Http\Controllers\Bitrix24AppController::class, 'botWelcome'])
+        ->name('bitrix24.bot-welcome');
+    Route::post('/bot-delete', [App\Http\Controllers\Bitrix24AppController::class, 'botDelete'])
+        ->name('bitrix24.bot-delete');
 });
  Route::get('/test', (function(){
     $integration = \App\Models\CrmIntegration::find(9);

@@ -415,6 +415,13 @@ class Bitrix24Provider implements CrmProviderInterface
     public function syncConversation(Conversation $conversation): bool
     {
         info('syncConversation in Bitrix24Provider');
+        if ($conversation->crm_lead_id) {
+            Log::info('Lead already exists for conversation', [
+                'conversation_id' => $conversation->id,
+                'lead_id' => $conversation->crm_lead_id
+            ]);
+            return true; // Возвращаем успех, так как синхронизация уже выполнена
+        }
         try {
             // 1. Синхронизируем контакт
             $contactData = [
