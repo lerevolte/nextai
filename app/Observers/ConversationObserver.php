@@ -15,16 +15,23 @@ class ConversationObserver
     
     public function created(Conversation $conversation): void
     {
-        // Предотвращаем дублирование обработки
-        $lockKey = "conversation_processing_" . $conversation->id;
-        
-        if (Cache::has($lockKey)) {
-            Log::info("Conversation {$conversation->id} already being processed, skipping");
+        $channel = $conversation->channel;
+        if ($channel && $channel->type === 'web') {
+            Log::info("Web widget conversation created, waiting for first user message", [
+                'conversation_id' => $conversation->id
+            ]);
             return;
         }
+        // Предотвращаем дублирование обработки
+        // $lockKey = "conversation_processing_" . $conversation->id;
         
-        // Устанавливаем блокировку на 30 секунд
-        Cache::put($lockKey, true, 30);
+        // if (Cache::has($lockKey)) {
+        //     Log::info("Conversation {$conversation->id} already being processed, skipping");
+        //     return;
+        // }
+        
+        // // Устанавливаем блокировку на 30 секунд
+        // Cache::put($lockKey, true, 30);
         
         Log::info('Conversation created, starting CRM sync', [
             'conversation_id' => $conversation->id,

@@ -22,8 +22,18 @@ class MessageObserver
             'message_id' => $messageId,
             'conversation_id' => $conversationId,
             'role' => $role,
-            'content_preview' => substr($message->content, 0, 50) . '...'
         ]);
+        
+        // Проверяем, что это первое РЕАЛЬНОЕ сообщение пользователя (не приветственное от бота)
+        // if ($message->role === 'user') {
+        //     $conversation = $message->conversation;
+            
+        //     // Проверяем, была ли уже создана открытая линия
+        //     if (!($conversation->metadata['bitrix24_initial_message_sent'] ?? false)) {
+        //         // Это первое сообщение пользователя - создаем открытую линию
+        //         $this->createOpenLineForFirstMessage($conversation, $message);
+        //     }
+        // }
         
         if ($message->role === 'user') {
             $isFirstUserMessage = $message->conversation->messages()
