@@ -259,9 +259,9 @@
                                     <span class="badge badge-success">Чат-бот зарегистрирован</span>
                                     <p>ID бота: {{ $bot->metadata['bitrix24_bot_id'] }}</p>
                                 @else
-                                    <button onclick="registerBot({{ $bot->id }})" class="btn btn-primary">
+                                    <!-- <button onclick="registerBot({{ $bot->id }})" class="btn btn-primary">
                                         Зарегистрировать чат-бота
-                                    </button>
+                                    </button> -->
                                 @endif
                                 @if($isRegistered)
                                     <div class="bot-status registered">
@@ -455,6 +455,39 @@
         function closeInstructions() {
             document.getElementById('instructions-modal').style.display = 'none';
         }
+        function checkConnectorStatus(botId) {
+            fetch('/bitrix24/check-connector-status', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    bot_id: botId,
+                    domain: '{{ $domain }}',
+                    auth_id: '{{ $authId }}'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.registered) {
+                    console.log('Connector is registered:', data);
+                    // Обновляем UI
+                    document.getElementById('connector-status-' + botId).innerHTML = 
+                        '<span class="text-green-600">✓ Зарегистрирован</span>';
+                } else {
+                    console.log('Connector not found');
+                    document.getElementById('connector-status-' + botId).innerHTML = 
+                        '<span class="text-red-600">✗ Не найден в Битрикс24</span>';
+                }
+            });
+        }
+
+        // Проверяем статус для каждого бота при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            @foreach($bots as $bot)
+                checkConnectorStatus({{ $bot->id }});
+            @endforeach
+        });
     </script>
 </body>
 </html>

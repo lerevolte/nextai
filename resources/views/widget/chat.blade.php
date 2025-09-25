@@ -189,7 +189,8 @@
             color: white;
             border-bottom-right-radius: 4px;
         }
-        .message.assistant .message-content {
+        .message.assistant .message-content,
+        .message.operator .message-content {
             background: white;
             color: #1f2937;
             border-bottom-left-radius: 4px;
@@ -290,6 +291,46 @@
         .hidden {
             display: none !important;
         }
+        .image-container {
+            margin: 8px 0;
+            max-width: 300px;
+        }
+
+        .image-container img {
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: pointer;
+            max-width: 100%;
+            height: auto;
+        }
+
+        .image-container img:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .image-container .text-xs {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        /* Стили для ссылок */
+        .message-content a {
+            color: #2563eb;
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
+        .message-content a:hover {
+            color: #1d4ed8;
+        }
+
+        /* Стили для жирного текста */
+        .message-content strong {
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -365,8 +406,110 @@
     let conversationId = null;
     let botSettings = {};
     let userInfo = null;
+    let pollingInterval = null;
+    let lastMessageId = null;
 
-    // --- Инициализация чата при загрузке ---
+    // --- Утилиты ---
+    function formatTime(date) {
+        if (!(date instanceof Date)) date = new Date(date);
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${hours}:${minutes}`;
+    }
+
+    function escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // --- Основные функции UI ---
+
+    function addMessageToChat(role, content, timestamp, messageId) {
+        const messagesContainer = document.getElementById('chatMessages');
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message', role);
+        if (messageId) {
+            messageElement.setAttribute('data-message-id', messageId);
+        }
+
+        const contentElement = document.createElement('div');
+        contentElement.classList.add('message-content');
+        // Используем innerHTML, так как контент может содержать HTML (например, имя оператора)
+        contentElement.innerHTML = content.replace(/\n/g, '<br>');
+
+        const timeElement = document.createElement('div');
+        timeElement.classList.add('message-time');
+        timeElement.textContent = formatTime(timestamp || new Date());
+
+        contentElement.appendChild(timeElement);
+        messageElement.appendChild(contentElement);
+        
+        const typingIndicator = document.getElementById('typingIndicator');
+        messagesContainer.insertBefore(messageElement, typingIndicator);
+
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function displayChatInterface(messages) {
+        document.getElementById('contactForm').classList.add('hidden');
+        
+        const userInfoBadge = document.getElementById('userInfoBadge');
+        const userDisplayName = document.getElementById('userDisplayName');
+        if (userInfo && userInfo.name) {
+            userDisplayName.textContent = escapeHtml(userInfo.name);
+            userInfoBadge.classList.add('show');
+        } else {
+            userInfoBadge.classList.remove('show');
+        }
+
+        document.getElementById('chatInputContainer').classList.remove('hidden');
+
+        clearMessages();
+        loadMessageHistory(messages);
+        
+        // Запускаем опрос сообщений, когда интерфейс чата готов
+        setTimeout(startMessagePolling, 1000);
+    }
+
+    function displayContactForm() {
+        clearMessages();
+        document.getElementById('contactForm').classList.remove('hidden');
+        document.getElementById('chatInputContainer').classList.add('hidden');
+        document.getElementById('userInfoBadge').classList.remove('show');
+    }
+
+    function clearMessages() {
+        const messagesContainer = document.getElementById('chatMessages');
+        messagesContainer.querySelectorAll('.message').forEach(el => el.remove());
+    }
+    
+    function loadMessageHistory(messages) {
+        if (messages && messages.length > 0) {
+            messages.forEach(msg => {
+                let content = escapeHtml(msg.content);
+                if (msg.role === 'operator' && msg.metadata?.operator_name) {
+                    content = `<strong>${escapeHtml(msg.metadata.operator_name)}:</strong> ${content}`;
+                }
+                addMessageToChat(msg.role, content, new Date(msg.created_at), msg.id);
+            });
+            // Обновляем ID последнего сообщения для начала опроса
+            lastMessageId = messages[messages.length - 1].id;
+        }
+    }
+    
+    function showTypingIndicator() {
+        document.getElementById('typingIndicator').classList.add('active');
+        const messagesContainer = document.getElementById('chatMessages');
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+        document.getElementById('typingIndicator').classList.remove('active');
+    }
+
+    // --- Инициализация и обработка сессии ---
     async function initChat() {
         try {
             const response = await fetch(config.apiUrl + '/initialize', {
@@ -379,7 +522,6 @@
 
             const data = await response.json();
             
-            // Обновляем состояние из ответа сервера
             sessionId = data.session_id;
             conversationId = data.conversation_id;
             botSettings = data.bot;
@@ -387,22 +529,17 @@
 
             localStorage.setItem('chat_session_' + config.botSlug, sessionId);
             
-            // Настраиваем UI бота
-            document.getElementById('botName').textContent = botSettings.name || 'Чат-бот';
+            document.getElementById('botName').textContent = botSettings.name ? escapeHtml(botSettings.name) : 'Чат-бот';
             document.getElementById('botAvatar').textContent = (botSettings.name || 'Б').charAt(0).toUpperCase();
 
-            // Решаем, что показать: форму или чат
             if (userInfo) {
-                // Если сервер вернул данные пользователя, значит сессия активна
                 localStorage.setItem('chat_user_info_' + config.botSlug, JSON.stringify(userInfo));
                 displayChatInterface(data.messages);
             } else if (botSettings.collect_contacts) {
-                // Если данных нет и нужно их собирать - показываем форму
                 localStorage.removeItem('chat_user_info_' + config.botSlug);
                 displayContactForm();
             } else {
-                // Если данные не нужны - начинаем как гость
-                skipContactForm();
+                await skipContactForm();
             }
 
         } catch (error) {
@@ -411,39 +548,34 @@
             chatMessages.innerHTML = '<p style="text-align: center; padding: 20px; color: #6b7280;">Произошла ошибка при загрузке чата. Пожалуйста, обновите страницу.</p>';
         }
     }
+    
+    async function startSessionWithUserInfo(newUserInfo) {
+        try {
+            const response = await fetch(config.apiUrl + '/initialize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
+                body: JSON.stringify({ session_id: sessionId, user_info: newUserInfo })
+            });
+            const data = await response.json();
 
-    // --- Управление UI ---
+            userInfo = data.user_info;
+            conversationId = data.conversation_id;
+            localStorage.setItem('chat_user_info_' + config.botSlug, JSON.stringify(userInfo));
+            
+            displayChatInterface(data.messages);
+            
+            if (!data.messages || data.messages.length === 0) {
+                 const welcomeMsg = botSettings.welcome_message || `Здравствуйте, ${escapeHtml(userInfo.name)}! Чем могу помочь?`;
+                 addMessageToChat('assistant', welcomeMsg);
+            }
 
-    function displayChatInterface(messages = []) {
-        document.getElementById('contactForm').classList.add('hidden');
-        document.getElementById('chatInputContainer').classList.remove('hidden');
-        
-        const badge = document.getElementById('userInfoBadge');
-        if (userInfo && userInfo.name) {
-            document.getElementById('userDisplayName').textContent = userInfo.name;
-            badge.classList.add('show');
-        } else {
-            badge.classList.remove('show');
+        } catch (error) {
+            console.error('Failed to start session with user info:', error);
+            addMessageToChat('assistant', 'Не удалось начать чат. Пожалуйста, попробуйте снова.');
         }
-        
-        clearMessages();
-        loadMessageHistory(messages);
     }
     
-    function displayContactForm() {
-        clearMessages();
-        document.getElementById('contactForm').classList.remove('hidden');
-        document.getElementById('chatInputContainer').classList.add('hidden');
-        document.getElementById('userInfoBadge').classList.remove('show');
-    }
-
-    function clearMessages() {
-        const messagesContainer = document.getElementById('chatMessages');
-        messagesContainer.querySelectorAll('.message').forEach(el => el.remove());
-    }
-
     // --- Обработка формы контактов ---
-
     function validateContactForm() {
         let isValid = true;
         const userName = document.getElementById('userName');
@@ -480,50 +612,21 @@
             phone: document.getElementById('userPhone').value.trim() || null
         };
         
-        // Отправляем данные на сервер для обновления диалога
         await startSessionWithUserInfo(submittedUserInfo);
     }
 
     async function skipContactForm() {
         await startSessionWithUserInfo({ name: 'Гость', email: null, phone: null });
     }
-
-    async function startSessionWithUserInfo(newUserInfo) {
-        try {
-            const response = await fetch(config.apiUrl + '/initialize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
-                body: JSON.stringify({ session_id: sessionId, user_info: newUserInfo })
-            });
-            const data = await response.json();
-
-            // Обновляем состояние и UI
-            userInfo = data.user_info;
-            conversationId = data.conversation_id;
-            localStorage.setItem('chat_user_info_' + config.botSlug, JSON.stringify(userInfo));
-            displayChatInterface(data.messages);
-            
-            // Добавляем приветственное сообщение, если история пуста
-            if (!data.messages || data.messages.length === 0) {
-                 const welcomeMsg = botSettings.welcome_message || `Здравствуйте, ${userInfo.name}! Чем могу помочь?`;
-                 addMessageToChat('assistant', welcomeMsg);
-            }
-
-        } catch (error) {
-            console.error('Failed to start session with user info:', error);
-            addMessageToChat('assistant', 'Не удалось начать чат. Пожалуйста, попробуйте снова.');
-        }
-    }
     
-    // --- Логика чата ---
-
+    // --- Логика отправки и получения сообщений ---
     async function sendMessage() {
         const input = document.getElementById('messageInput');
         const message = input.value.trim();
         if (!message) return;
 
         document.getElementById('sendButton').disabled = true;
-        addMessageToChat('user', message);
+        addMessageToChat('user', escapeHtml(message));
         input.value = '';
         showTypingIndicator();
 
@@ -539,7 +642,7 @@
                 addMessageToChat('assistant', data.error);
             } else {
                 conversationId = data.conversation_id;
-                addMessageToChat('assistant', data.message.content, new Date(data.message.created_at));
+                addMessageToChat('assistant', escapeHtml(data.message.content), new Date(data.message.created_at));
             }
         } catch (error) {
             console.error('Failed to send message:', error);
@@ -550,36 +653,6 @@
         }
     }
 
-    function loadMessageHistory(messages) {
-        if (messages && messages.length > 0) {
-            messages.forEach(msg => addMessageToChat(msg.role, msg.content, new Date(msg.created_at)));
-        }
-    }
-
-    function addMessageToChat(role, content, timestamp = new Date()) {
-        const messagesContainer = document.getElementById('chatMessages');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${role}`;
-        
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        
-        const textDiv = document.createElement('div');
-        textDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
-        
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'message-time';
-        timeDiv.textContent = formatTime(timestamp);
-
-        contentDiv.appendChild(textDiv);
-        contentDiv.appendChild(timeDiv);
-        messageDiv.appendChild(contentDiv);
-        
-        const typingIndicator = document.getElementById('typingIndicator');
-        messagesContainer.insertBefore(messageDiv, typingIndicator);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-
     function handleKeyPress(event) {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
@@ -587,45 +660,71 @@
         }
     }
 
-    function showTypingIndicator() {
-        document.getElementById('typingIndicator').classList.add('active');
-        const messagesContainer = document.getElementById('chatMessages');
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    // --- Опрос новых сообщений (Polling) ---
+    function startMessagePolling() {
+        if (pollingInterval) clearInterval(pollingInterval); // Предотвращаем двойной запуск
+        if (!sessionId) {
+            console.error('Missing sessionId for polling');
+            return;
+        }
+        
+        pollingInterval = setInterval(pollForNewMessages, 2000);
+        console.log('Polling started', { sessionId, lastMessageId });
     }
 
-    function hideTypingIndicator() {
-        document.getElementById('typingIndicator').classList.remove('active');
-    }
-    
-    // --- Утилиты ---
+    async function pollForNewMessages() {
+        try {
+            const response = await fetch(`/widget/${config.botSlug}/poll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    last_message_id: lastMessageId
+                })
+            });
 
-    function formatTime(date) {
-        if (!(date instanceof Date)) date = new Date(date);
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        return `${hours}:${minutes}`;
+            if (!response.ok) {
+                console.error('Polling failed:', response.status);
+                return;
+            }
+
+            const data = await response.json();
+            
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(message => {
+                    if (!document.querySelector(`[data-message-id="${message.id}"]`)) {
+                        appendPolledMessage(message);
+                        lastMessageId = message.id; // Обновляем ID последнего сообщения
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Polling error:', error);
+        }
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    function appendPolledMessage(message) {
+        let content = escapeHtml(message.content);
+        if (message.role === 'operator' && message.metadata?.operator_name) {
+             const operatorName = message.metadata.operator_name || 'Оператор';
+             content = `<strong>${escapeHtml(operatorName)}:</strong> ${content}`;
+        }
+        addMessageToChat(message.role, content, new Date(message.created_at), message.id);
     }
 
     // --- Запуск и завершение ---
-
     document.addEventListener('DOMContentLoaded', initChat);
 
     window.addEventListener('beforeunload', () => {
+        if (pollingInterval) clearInterval(pollingInterval);
         if (conversationId && sessionId) {
-            navigator.sendBeacon(
-                config.apiUrl + '/end',
-                JSON.stringify({
-                    session_id: sessionId,
-                    conversation_id: conversationId,
-                    _token: config.csrfToken
-                })
-            );
+            // Используем navigator.sendBeacon для надежной отправки данных при закрытии страницы
+            const data = new Blob([JSON.stringify({
+                session_id: sessionId,
+                conversation_id: conversationId,
+                _token: config.csrfToken
+            })], { type: 'application/json' });
+            navigator.sendBeacon(config.apiUrl + '/end', data);
         }
     });
 </script>

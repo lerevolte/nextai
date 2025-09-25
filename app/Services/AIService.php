@@ -39,6 +39,7 @@ class AIService
         // Формируем историю сообщений
         $messages = $this->prepareMessages($bot, $conversation, $message, $context);
 
+
         // Генерируем ответ
         return $provider->generateResponse(
             model: $bot->ai_model,
@@ -91,14 +92,17 @@ class AIService
                 return '';
             }
 
-            // Ограничиваем размер контекста для Gemini
+            // Определяем лимиты в зависимости от провайдера
+            $maxContextLength = $bot->ai_provider === 'gemini' ? 800 : 2000;
+            $maxItemLength = $bot->ai_provider === 'gemini' ? 300 : 500;
+            
             $context = "Используй эту информацию для ответа:\n\n";
-            $maxContextLength = 2000; // Максимальная длина контекста
-            $currentLength = 0;
+            $currentLength = strlen($context);
             
             foreach ($items as $item) {
+
                 $itemContent = "Тема: " . $item->title . "\n" . 
-                              Str::limit($item->content, 500) . "\n\n";
+                              Str::limit($item->content, $maxItemLength) . "\n\n";
                 
                 if ($currentLength + strlen($itemContent) <= $maxContextLength) {
                     $context .= $itemContent;
@@ -107,6 +111,7 @@ class AIService
                     break;
                 }
             }
+            
             
             return $context;
             
@@ -124,13 +129,15 @@ class AIService
     {
         $messages = [];
         
-        // Системный промпт - сокращаем если используем Gemini
+        // Системный промпт - сокращаем для Gemini
         if ($bot->ai_provider === 'gemini') {
-            $systemPrompt = Str::limit($bot->system_prompt, 500);
+            $systemPrompt = Str::limit($bot->system_prompt, 300); // сокращаем еще больше
             if ($context) {
-                $systemPrompt .= "\n\nКонтекст: " . Str::limit($context, 1000);
+                // Если контекст + промпт слишком большие, сокращаем контекст
+                $maxContext = 800 - strlen($systemPrompt);
+                $context = Str::limit($context, max(200, $maxContext));
             }
-            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
+            $messages[] = ['role' => 'system', 'content' => $systemPrompt . ($context ? "\n\n" . $context : '')];
         } else {
             $messages[] = ['role' => 'system', 'content' => $bot->system_prompt];
             if ($context) {
@@ -138,8 +145,9 @@ class AIService
             }
         }
 
-        // История - ограничиваем для Gemini
-        $historyLimit = $bot->ai_provider === 'gemini' ? 5 : 10;
+        // История - еще меньше для Gemini при наличии контекста
+        $historyLimit = $bot->ai_provider === 'gemini' && !empty($context) ? 3 : 
+                       ($bot->ai_provider === 'gemini' ? 5 : 10);
         
         $history = $conversation->messages()
             ->orderBy('created_at', 'desc')
@@ -150,7 +158,7 @@ class AIService
         foreach ($history as $msg) {
             $messages[] = [
                 'role' => $msg->role === 'user' ? 'user' : 'assistant',
-                'content' => Str::limit($msg->content, 500)
+                'content' => Str::limit($msg->content, $bot->ai_provider === 'gemini' ? 300 : 500)
             ];
         }
 

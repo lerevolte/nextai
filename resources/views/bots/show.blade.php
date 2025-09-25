@@ -381,15 +381,44 @@
                             <h4 class="text-sm font-medium text-gray-900">Код для встраивания виджета</h4>
                             <p class="mt-1 text-sm text-gray-500">Вставьте этот код перед закрывающим тегом &lt;/body&gt; на вашем сайте</p>
                             <div class="mt-2">
-                                <pre class="bg-gray-100 rounded-lg p-4 text-xs overflow-x-auto"><code>&lt;script src="{{ url('/widget/script.js') }}"&gt;&lt;/script&gt;
-&lt;script&gt;
-  ChatBotWidget.init({
-    botId: '{{ $bot->slug }}',
-    position: 'bottom-right',
-    primaryColor: '#4F46E5',
-    baseUrl: '{{ url('/') }}'
-  });
-&lt;/script&gt;</code></pre>
+                                <pre class="bg-gray-100 rounded-lg p-4 text-xs overflow-x-auto"><code>&lt;!-- Chat Widget Script --&gt;
+                &lt;iframe 
+                    src="{{ url('/widget/' . $bot->slug) }}"
+                    style="position: fixed; bottom: 20px; right: 20px; width: 380px; height: 600px; border: none; border-radius: 15px; box-shadow: 0 5px 40px rgba(0,0,0,0.16); z-index: 9999;"
+                    allow="microphone; camera"&gt;
+                &lt;/iframe&gt;</code></pre>
+                            </div>
+                            <button onclick="copyCode(this)" class="mt-2 px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+                                📋 Копировать код
+                            </button>
+                        </div>
+
+                        <div style="display: none;">
+                            <h4 class="text-sm font-medium text-gray-900">API Ключ бота</h4>
+                            <p class="mt-1 text-sm text-gray-500">Используйте этот ключ для API запросов к боту</p>
+                            <div class="mt-2">
+                                <div class="flex">
+                                    <input type="password" id="api-key" readonly 
+                                           value="{{ $bot->api_key ?? 'Не сгенерирован' }}" 
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg bg-gray-50 text-sm font-mono">
+                                    <button onclick="toggleApiKey()" 
+                                            class="px-4 py-2 bg-gray-100 border border-l-0 border-gray-300 hover:bg-gray-200">
+                                        Показать
+                                    </button>
+                                    <button onclick="copyApiKey()" 
+                                            class="px-4 py-2 bg-blue-500 text-white hover:bg-blue-600">
+                                        Копировать
+                                    </button>
+                                    <button onclick="regenerateApiKey()" 
+                                            class="px-4 py-2 bg-orange-500 text-white rounded-r-lg hover:bg-orange-600">
+                                        🔄 Обновить
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                <p class="text-sm text-yellow-800">
+                                    <strong>⚠️ Внимание:</strong> При обновлении ключа все существующие интеграции перестанут работать
+                                </p>
                             </div>
                         </div>
 
@@ -397,26 +426,80 @@
                             <h4 class="text-sm font-medium text-gray-900">Webhook URL</h4>
                             <p class="mt-1 text-sm text-gray-500">Используйте этот URL для интеграции с внешними сервисами</p>
                             <div class="mt-2">
-                                <input type="text" readonly value="{{ url('/api/bots/' . $bot->slug . '/webhook') }}" 
-                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm">
+                                <div class="flex">
+                                    <input type="text" readonly 
+                                           value="{{ url('/api/bots/' . $bot->slug . '/webhook') }}" 
+                                           id="webhook-url"
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg bg-gray-50 text-sm">
+                                    <button onclick="copyWebhookUrl()" 
+                                            class="px-4 py-2 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg hover:bg-gray-200">
+                                        Копировать
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
                         <div>
-                            <h4 class="text-sm font-medium text-gray-900">API Ключ</h4>
-                            <p class="mt-1 text-sm text-gray-500">Используйте этот ключ для API запросов</p>
-                            <div class="mt-2">
-                                <div class="flex">
-                                    <input type="password" id="api-key" readonly value="{{ $bot->api_key ?? 'Нажмите для генерации' }}" 
-                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg bg-gray-50 text-sm">
-                                    <button onclick="toggleApiKey()" class="px-4 py-2 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg hover:bg-gray-200">
-                                        Показать
-                                    </button>
+                            <h4 class="text-sm font-medium text-gray-900 mb-3">Документация API</h4>
+                            <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700">Отправка сообщения:</p>
+                                    <pre class="mt-1 bg-white p-2 rounded text-xs overflow-x-auto"><code>POST /api/bots/{{ $bot->slug }}/message
+                Headers: 
+                  Authorization: Bearer {{ $bot->api_key ?? 'YOUR_API_KEY' }}
+                  Content-Type: application/json
+
+                Body:
+                {
+                  "message": "Текст сообщения",
+                  "user_id": "unique_user_id"
+                }</code></pre>
+                                </div>
+                                
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700">Получение истории:</p>
+                                    <pre class="mt-1 bg-white p-2 rounded text-xs overflow-x-auto"><code>GET /api/bots/{{ $bot->slug }}/conversations
+                Headers:
+                  Authorization: Bearer {{ $bot->api_key ?? 'YOUR_API_KEY' }}</code></pre>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                <script>
+                function copyCode(button) {
+                    const code = button.previousElementSibling.querySelector('code').textContent;
+                    navigator.clipboard.writeText(code).then(() => {
+                        const originalText = button.textContent;
+                        button.textContent = '✓ Скопировано!';
+                        button.classList.add('bg-green-500', 'text-white');
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                            button.classList.remove('bg-green-500', 'text-white');
+                        }, 2000);
+                    });
+                }
+
+                function copyApiKey() {
+                    const input = document.getElementById('api-key');
+                    const actualValue = input.value;
+                    input.type = 'text';
+                    input.select();
+                    document.execCommand('copy');
+                    input.type = 'password';
+                    
+                    showNotification('API ключ скопирован в буфер обмена', 'success');
+                }
+
+                function copyWebhookUrl() {
+                    const input = document.getElementById('webhook-url');
+                    input.select();
+                    document.execCommand('copy');
+                    
+                    showNotification('Webhook URL скопирован в буфер обмена', 'success');
+                }
+                </script>
             </div>
         </div>
     </div>

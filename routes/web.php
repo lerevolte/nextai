@@ -29,7 +29,9 @@ Route::prefix('widget')->group(function () {
     Route::post('/{bot:slug}/initialize', [WidgetController::class, 'initialize'])->name('widget.initialize');
     Route::post('/{bot:slug}/message', [WidgetController::class, 'sendMessage'])->name('widget.message');
     Route::post('/{bot:slug}/end', [WidgetController::class, 'endConversation'])->name('widget.end');
+    Route::post('/{bot:slug}/poll', [WidgetController::class, 'pollMessages'])->name('widget.poll');
 });
+
 
 // API для виджета (альтернативный вариант)
 Route::prefix('api/widget')->group(function () {
@@ -44,6 +46,15 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/whatsapp/{channel}', [WebhookController::class, 'whatsapp']);
     Route::post('/vk/{channel}', [WebhookController::class, 'vk']);
 });
+Route::post('/webhooks/bitrix24/openline', function(Request $request) {
+    Log::info('Bitrix24 openline webhook received', $request->all());
+    
+    // Обрабатываем сообщение от оператора
+    app(\App\Services\Bitrix24\Bitrix24AppService::class)->handleOpenlineWebhook($request->all());
+    
+    return response('OK');
+})->withoutMiddleware(['web', 'csrf']);
+
 
 // Аутентификация
 Route::middleware('guest')->group(function () {
@@ -71,7 +82,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/regenerate-api-key', [OrganizationController::class, 'regenerateApiKey'])
             ->name('organization.regenerate-api-key');
         // Пользователи
-        Route::resource('users', UserController::class)->middleware('permission:users.view');
+        Route::group([
+            'prefix' => 'users',
+            // 'middleware' => [function (Illuminate\Http\Request $request, $next) {
+            //     if (!auth()->user()->hasRole(['owner', 'admin'])) {
+            //         abort(403, 'У вас нет прав для управления пользователями');
+            //     }
+            //     return $next($request);
+            // }]
+        ],function () {
+                Route::get('/', [UserController::class, 'index'])->name('organization.users.index');
+                Route::get('/create', [UserController::class, 'create'])->name('organization.users.create');
+                Route::post('/', [UserController::class, 'store'])->name('organization.users.store');
+                Route::get('/{user}/edit', [UserController::class, 'edit'])->name('organization.users.edit');
+                Route::put('/{user}', [UserController::class, 'update'])->name('organization.users.update');
+                Route::delete('/{user}', [UserController::class, 'destroy'])->name('organization.users.destroy');
+            });
 
     });
 
@@ -80,6 +106,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware(['organization.access'])->group(function () {
         Route::prefix('o/{organization:slug}')->group(function () {
             Route::resource('bots', BotController::class);
+            Route::post('/bots/{bot}/regenerate-api-key', [BotController::class, 'regenerateApiKey'])->name('bots.regenerate-api-key');
             
             // Каналы бота
             Route::prefix('bots/{bot}')->middleware('bot.access')->group(function () {
@@ -99,8 +126,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 // Диалоги
                 Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
                 Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
+                Route::post('/conversations/{conversation}', [ConversationController::class, 'sendMessage'])->name('conversations.message');
+                Route::get('/conversations/{conversation}/export', [ConversationController::class, 'export'])->name('conversations.export');
                 Route::post('/conversations/{conversation}/takeover', [ConversationController::class, 'takeover'])->name('conversations.takeover');
                 Route::post('/conversations/{conversation}/close', [ConversationController::class, 'close'])->name('conversations.close');
+
             });
             Route::prefix('bots/{bot}/knowledge')->middleware('bot.access')->group(function () {
                 Route::get('/sources', [KnowledgeSourceController::class, 'index'])->name('knowledge.sources.index');
@@ -251,7 +281,8 @@ Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function ()
     // Обработчик событий
     Route::post('/event-handler', [App\Http\Controllers\Bitrix24AppController::class, 'eventHandler'])
         ->name('bitrix24.event-handler');
-
+    Route::post('/check-connector-status', [App\Http\Controllers\Bitrix24AppController::class, 'checkConnectorStatus'])
+        ->name('bitrix24.check-connector-status');
 
     Route::post('/login', [App\Http\Controllers\Bitrix24AppController::class, 'login'])
         ->name('bitrix24.login')
@@ -298,3 +329,36 @@ Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
         Route::get('/conversations/{conversation}/messages', [ConversationController::class, 'messages']);
     });
 });
+Route::get('/test/bitrix24-events/{integration}', function($integrationId) {
+    $integration = \App\Models\CrmIntegration::find($integrationId);
+    if (!$integration) {
+        return 'Integration not found';
+    }
+    
+    $appService = app(\App\Services\Bitrix24\Bitrix24AppService::class);
+    
+    // Проверяем зарегистрированные события
+    $events = $appService->checkRegisteredEvents($integration);
+    
+    // Пробуем зарегистрировать события заново
+    $appService->registerEventHandlers($integration);
+    
+    // Проверяем снова
+    $eventsAfter = $appService->checkRegisteredEvents($integration);
+    
+    return response()->json([
+        'before' => $events,
+        'after' => $eventsAfter,
+        'integration' => $integration->id
+    ]);
+})->middleware('auth');
+Route::any('/test/bitrix24-webhook', function(Request $request) {
+    Log::info('=== TEST: Bitrix24 webhook received ===', [
+        'method' => $request->method(),
+        'url' => $request->fullUrl(),
+        'all_data' => $request->all(),
+        'headers' => $request->headers->all()
+    ]);
+    
+    return response('OK - logged');
+})->withoutMiddleware(['web', 'csrf']);

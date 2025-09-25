@@ -236,7 +236,6 @@ class NotionService
 
     protected function extractProperties(Page $page): array
     {
-        // ... (код extractProperties остается без изменений) ...
         $properties = [];
         foreach ($page->properties as $name => $property) {
             switch ($property->metadata()->type->value) {
@@ -258,6 +257,18 @@ class NotionService
                     break;
                 case PropertyType::Date->value:
                     $properties[$name] = $property->start()?->format('Y-m-d');
+                    break;
+                // ДОБАВЛЯЕМ ПОДДЕРЖКУ URL
+                case PropertyType::Url->value:
+                    $properties[$name] = $property->url;
+                    break;
+                // ДОБАВЛЯЕМ ПОДДЕРЖКУ EMAIL (на всякий случай)
+                case PropertyType::Email->value:
+                    $properties[$name] = $property->email;
+                    break;
+                // ДОБАВЛЯЕМ ПОДДЕРЖКУ ТЕЛЕФОНА
+                case PropertyType::PhoneNumber->value:
+                    $properties[$name] = $property->phoneNumber;
                     break;
                 default:
                     Log::warning("Unsupported property type: " . $property->metadata()->type->value);

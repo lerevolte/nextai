@@ -33,14 +33,22 @@ class Bitrix24AppService
         try {
             $events = [
                 'ONIMCONNECTORMESSAGEADD' => url('/bitrix24/event-handler'),
+                'ONIMOPENLINESMESSAGEADD' => url('/bitrix24/event-handler'), // Сообщения в открытых линиях
+                'ONIMCONNECTORMESSAGEUPDATE' => url('/bitrix24/event-handler'), // Обновления сообщений
+                'ONIMBOTMESSAGEADD' => url('/bitrix24/event-handler'), // Сообщения к боту
                 'ONAPPUNINSTALL' => url('/bitrix24/event-handler'),
             ];
             
             foreach ($events as $event => $handler) {
-                $this->makeRequest($integration, 'event.bind', [
+                $result = $this->makeRequest($integration, 'event.bind', [
                     'event' => $event,
                     'handler' => $handler,
                     'auth_type' => 0,
+                ]);
+                
+                Log::info('Event handler registration result', [
+                    'event' => $event,
+                    'result' => $result
                 ]);
             }
             
@@ -63,26 +71,55 @@ class Bitrix24AppService
     {
         try {
             $botCode = 'chatbot_' . $bot->organization_id . '_' . $bot->id;
-            
+        
             // Проверяем, не зарегистрирован ли уже бот
             if ($bot->metadata['bitrix24_bot_id'] ?? false) {
-                return [
-                    'success' => true,
-                    'bot_id' => $bot->metadata['bitrix24_bot_id'],
-                    'message' => 'Bot already registered'
-                ];
+                // Проверяем, существует ли бот в Битрикс24
+                try {
+                    $checkResult = $this->makeRequest($integration, 'imbot.bot.list');
+                    $botExists = false;
+                    
+                    if (!empty($checkResult['result'])) {
+                        foreach ($checkResult['result'] as $b24bot) {
+                            if ($b24bot['ID'] == $bot->metadata['bitrix24_bot_id']) {
+                                $botExists = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if ($botExists) {
+                        return [
+                            'success' => true,
+                            'bot_id' => $bot->metadata['bitrix24_bot_id'],
+                            'message' => 'Bot already registered'
+                        ];
+                    }
+                    
+                    // Если бот не существует в Битрикс24, удаляем старый ID
+                    $metadata = $bot->metadata ?? [];
+                    unset($metadata['bitrix24_bot_id']);
+                    unset($metadata['bitrix24_bot_registered_at']);
+                    $bot->update(['metadata' => $metadata]);
+                    
+                } catch (\Exception $e) {
+                    Log::warning('Could not check bot existence', ['error' => $e->getMessage()]);
+                }
             }
             
-            // Регистрируем бота с обязательными обработчиками
+            // Регистрируем бота с правильными параметрами для открытых линий
             $result = $this->makeRequest($integration, 'imbot.register', [
                 'CODE' => $botCode,
-                'TYPE' => 'B',
+                'TYPE' => 'O', // ВАЖНО: Тип 'O' для бота открытых линий, а не 'B'
                 'EVENT_MESSAGE_ADD' => url('/bitrix24/bot-handler'),
-                'EVENT_WELCOME_MESSAGE' => url('/bitrix24/bot-welcome'), // Обязательное поле!
+                'EVENT_WELCOME_MESSAGE' => url('/bitrix24/bot-welcome'),
                 'EVENT_BOT_DELETE' => url('/bitrix24/bot-delete'),
+                'OPENLINE' => 'Y', // Указываем, что это бот для открытых линий
                 'PROPERTIES' => [
                     'NAME' => $bot->name,
                     'COLOR' => 'AQUA',
+                    'EMAIL' => 'bot@' . parse_url(config('app.url'), PHP_URL_HOST),
+                    'PERSONAL_PHOTO' => $bot->avatar_url ?? '',
                 ]
             ]);
 
@@ -133,16 +170,17 @@ class Bitrix24AppService
                 if (!$botResult['success']) {
                     throw new \Exception('Failed to register chatbot: ' . $botResult['error']);
                 }
+                // Перезагружаем бота чтобы получить обновленные метаданные
+                $bot->refresh();
             }
 
             $connectorId = $this->getConnectorId($bot);
             $bitrix24BotId = $bot->metadata['bitrix24_bot_id'];
             
-            // Регистрируем коннектор с привязкой к боту
+            // Регистрируем коннектор
             $result = $this->makeRequest($integration, 'imconnector.register', [
                 'ID' => $connectorId,
                 'NAME' => $bot->name,
-                'BOT_ID' => $bitrix24BotId, // Привязываем к зарегистрированному боту
                 'ICON' => [
                     'DATA_IMAGE' => $this->getBotIcon($bot),
                     'COLOR' => '#6366F1',
@@ -150,8 +188,15 @@ class Bitrix24AppService
                 'PLACEMENT_HANDLER' => url('/bitrix24/activate-connector'),
             ]);
             
-            if (empty($result['result'])) {
-                throw new \Exception('Failed to register connector');
+            // Проверяем результат регистрации
+            if (isset($result['error'])) {
+                // Если ошибка "Connector already registered", это нормально
+                if (strpos($result['error'], 'already registered') !== false || 
+                    strpos($result['error'], 'CONNECTOR_ALREADY_REGISTERED') !== false) {
+                    Log::info('Connector already registered', ['connector_id' => $connectorId]);
+                } else {
+                    throw new \Exception('Failed to register connector: ' . ($result['error_description'] ?? $result['error']));
+                }
             }
 
             // Обновляем метаданные бота
@@ -160,15 +205,24 @@ class Bitrix24AppService
                     'bitrix24_connector_registered' => true,
                     'bitrix24_connector_id' => $connectorId,
                     'bitrix24_connector_registered_at' => now()->toIso8601String(),
+                    'bitrix24_bot_id' => $bitrix24BotId,
                 ])
             ]);
             
+            // Очищаем кэш
             Cache::flush();
+            
+            Log::info('Connector registration completed', [
+                'connector_id' => $connectorId,
+                'bot_id' => $bitrix24BotId,
+                'bot_name' => $bot->name
+            ]);
 
             return [
                 'success' => true,
                 'connector_id' => $connectorId,
                 'bot_id' => $bitrix24BotId,
+                'message' => 'Коннектор зарегистрирован. Теперь подключите его в Битрикс24: CRM → Контакт-центр → Открытые линии → Подключить канал → ' . $bot->name
             ];
             
         } catch (\Exception $e) {
@@ -192,36 +246,70 @@ class Bitrix24AppService
         try {
             $connectorId = $this->getConnectorId($bot);
             
-            // Активируем коннектор
+            // Активируем коннектор без предварительной проверки
+            // так как imconnector.list не показывает пользовательские коннекторы
             $result = $this->makeRequest($integration, 'imconnector.activate', [
                 'CONNECTOR' => $connectorId,
                 'LINE' => $lineId,
                 'ACTIVE' => $active ? 1 : 0,
             ]);
             
-            if (empty($result['result'])) {
-                throw new \Exception('Failed to activate connector');
-            }
-            
-            // Передаем данные виджета
-            if ($active) {
-                $this->makeRequest($integration, 'imconnector.connector.data.set', [
-                    'CONNECTOR' => $connectorId,
-                    'LINE' => $lineId,
-                    'DATA' => [
-                        'id' => $connectorId . '_line_' . $lineId,
-                        'url_im' => route('widget.show', $bot->slug),
-                        'name' => $bot->name . ' Widget',
-                    ],
+            // Проверяем ошибки
+            if (isset($result['error'])) {
+                // Некоторые ошибки можно игнорировать
+                if (strpos($result['error'], 'CONNECTOR_NOT_FOUND') !== false) {
+                    throw new \Exception('Connector not registered. Please register connector first.');
+                }
+                Log::warning('Activation warning', [
+                    'error' => $result['error'],
+                    'connector_id' => $connectorId,
+                    'line_id' => $lineId
                 ]);
             }
             
-            // Обновляем настройки
+            // Передаем данные для отображения в виджете открытой линии
+            if ($active) {
+                $widgetData = [
+                    'CONNECTOR' => $connectorId,
+                    'LINE' => $lineId,
+                    'DATA' => [
+                        'id' => $connectorId,
+                        'url_im' => route('widget.show', $bot->slug),
+                        'url_webhook' => url('/webhooks/crm/bitrix24/connector/handler'),
+                        'name' => $bot->name,
+                        'desc' => $bot->description ?? 'AI Chat Bot',
+                    ]
+                ];
+                
+                $dataResult = $this->makeRequest($integration, 'imconnector.connector.data.set', $widgetData);
+                
+                Log::info('Connector data set', [
+                    'result' => $dataResult,
+                    'widget_data' => $widgetData
+                ]);
+            }
+            
+            // Обновляем настройки в БД
             $botIntegration = $integration->bots()->where('bot_id', $bot->id)->first();
-            $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
             if ($botIntegration) {
+                $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
                 $integration->bots()->updateExistingPivot($bot->id, [
-                    'connector_settings' => array_merge($connectorSettings, [
+                    'connector_settings' => json_encode(array_merge($connectorSettings, [
+                        'line_id' => $lineId,
+                        'active' => $active,
+                        'activated_at' => now()->toIso8601String(),
+                    ]))
+                ]);
+            } else {
+                // Если связи нет, создаем её
+                $integration->bots()->attach($bot->id, [
+                    'sync_contacts' => true,
+                    'sync_conversations' => true,
+                    'create_leads' => true,
+                    'create_deals' => false,
+                    'is_active' => true,
+                    'connector_settings' => json_encode([
+                        'connector_id' => $connectorId,
                         'line_id' => $lineId,
                         'active' => $active,
                         'activated_at' => now()->toIso8601String(),
@@ -229,8 +317,9 @@ class Bitrix24AppService
                 ]);
             }
             
-            Log::info('Connector activated', [
+            Log::info('Connector activated successfully', [
                 'bot_id' => $bot->id,
+                'connector_id' => $connectorId,
                 'line_id' => $lineId,
                 'active' => $active,
             ]);
@@ -240,12 +329,74 @@ class Bitrix24AppService
         } catch (\Exception $e) {
             Log::error('Failed to activate connector', [
                 'bot_id' => $bot->id,
+                'line_id' => $lineId,
                 'error' => $e->getMessage(),
             ]);
             
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    public function checkConnectorStatus(CrmIntegration $integration, Bot $bot): array
+    {
+        try {
+            $connectorId = $this->getConnectorId($bot);
+            
+            // Пробуем получить статус коннектора напрямую
+            try {
+                $statusResult = $this->makeRequest($integration, 'imconnector.status', [
+                    'CONNECTOR' => $connectorId
+                ]);
+                
+                if (!isset($statusResult['error'])) {
+                    return [
+                        'registered' => true,
+                        'connector_id' => $connectorId,
+                        'status' => $statusResult['result'] ?? null,
+                    ];
+                }
+                
+                // Если ошибка CONNECTOR_NOT_FOUND, значит не зарегистрирован
+                if (strpos($statusResult['error'], 'CONNECTOR_NOT_FOUND') !== false) {
+                    return [
+                        'registered' => false,
+                        'connector_id' => $connectorId,
+                        'error' => 'Connector not registered'
+                    ];
+                }
+                
+            } catch (\Exception $e) {
+                Log::warning('Could not get connector status', [
+                    'connector_id' => $connectorId,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            
+            // Fallback: проверяем по метаданным бота
+            if ($bot->metadata['bitrix24_connector_registered'] ?? false) {
+                return [
+                    'registered' => true,
+                    'connector_id' => $connectorId,
+                    'registered_at' => $bot->metadata['bitrix24_connector_registered_at'] ?? null,
+                ];
+            }
+            
+            return [
+                'registered' => false,
+                'connector_id' => $connectorId,
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to check connector status', [
+                'bot_id' => $bot->id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return [
+                'error' => $e->getMessage()
             ];
         }
     }
@@ -321,71 +472,115 @@ class Bitrix24AppService
         try {
             $messages = $data['MESSAGES'] ?? [];
             
-            Log::info('Connector messages received', [
+            Log::info('=== Connector messages received ===', [
                 'messages_count' => count($messages),
-                'data' => $data
+                'connector' => $data['CONNECTOR'] ?? null,
             ]);
             
             foreach ($messages as $messageData) {
-                $chatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
-                $conversation = Conversation::find($chatId);
+                // Извлекаем ID чата
+                $chatId = null;
+                
+                // Приоритет: сначала пробуем из im.chat_id (реальный ID чата в Битрикс24)
+                if (isset($messageData['im']['chat_id'])) {
+                    $chatId = $messageData['im']['chat_id'];
+                }
+                // Затем из chat.id (наш ID)
+                elseif (isset($messageData['chat']['id'])) {
+                    $chatId = str_replace('chat_', '', $messageData['chat']['id']);
+                }
+                
+                // Получаем ID пользователя и текст
+                $userId = $messageData['message']['user_id'] ?? null;
+                $rawText = $messageData['message']['text'] ?? '';
+                
+                // Парсим текст от оператора (убираем BB-коды)
+                $operatorName = null;
+                $messageText = $rawText;
+                
+                // Проверяем, есть ли имя оператора в тексте
+                if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
+                    $operatorName = $matches[1];
+                    $messageText = trim($matches[2]);
+                } else {
+                    // Просто убираем все BB-коды
+                    $messageText = preg_replace('/\[br\]/i', "\n", $messageText);
+                    $messageText = preg_replace('/\[b\](.*?)\[\/b\]/i', '$1', $messageText);
+                    $messageText = preg_replace('/\[\/?[a-z]+\]/i', '', $messageText);
+                }
+                
+                Log::info('Processing message', [
+                    'chat_id' => $chatId,
+                    'user_id' => $userId,
+                    'operator_name' => $operatorName,
+                    'original_text' => substr($rawText, 0, 50),
+                    'parsed_text' => substr($messageText, 0, 50)
+                ]);
+                
+                if (!$chatId) {
+                    Log::warning('No chat ID found in message data');
+                    continue;
+                }
+                
+                // Ищем диалог по реальному chat_id из Битрикс24
+                $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)
+                    ->orWhere('metadata->bitrix24_chat_id', (string)$chatId)
+                    ->first();
                 
                 if (!$conversation) {
-                    Log::warning('Conversation not found for Bitrix24 message', [
-                        'chat_id' => $chatId,
-                        'full_chat_id' => $messageData['chat']['id'] ?? null,
+                    // Пробуем найти по нашему ID
+                    $ourChatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
+                    if (is_numeric($ourChatId)) {
+                        $conversation = Conversation::find($ourChatId);
+                    }
+                }
+                
+                if (!$conversation) {
+                    Log::warning('Conversation not found', [
+                        'bitrix24_chat_id' => $chatId,
+                        'our_chat_id' => $messageData['chat']['id'] ?? null
                     ]);
                     continue;
                 }
-
-                // ИСПРАВЛЕНИЕ: Проверяем тип автора сообщения
-                $authorType = $messageData['user']['type'] ?? 'USER';
-                $authorId = $messageData['user']['id'] ?? null;
                 
-                Log::info('Processing message', [
-                    'author_type' => $authorType,
-                    'author_id' => $authorId,
-                    'message' => $messageData['message']['text'] ?? ''
+                Log::info('Found conversation', [
+                    'conversation_id' => $conversation->id,
+                    'bitrix24_chat_id' => $conversation->metadata['bitrix24_chat_id'] ?? null
                 ]);
 
-                // Пропускаем сообщения от нашего бота
-                if ($authorType === 'BOT') {
+                // Определяем роль: если есть имя оператора, значит это оператор
+                $role = $operatorName ? 'operator' : 'user';
+                
+                // Проверяем, не наше ли это сообщение
+                $bot = $conversation->bot;
+                if ($userId == ($bot->metadata['bitrix24_bot_id'] ?? null)) {
                     Log::info('Skipping bot message');
                     continue;
                 }
-
-                // Проверяем, не создавали ли мы уже это сообщение
-                $bitrix24MessageId = $messageData['message']['id'] ?? null;
+                
+                // Проверяем на дубликаты
+                $bitrix24MessageId = $messageData['im']['message_id'] ?? $messageData['message']['id'] ?? null;
                 if ($bitrix24MessageId) {
                     $existingMessage = $conversation->messages()
                         ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
                         ->first();
                     
                     if ($existingMessage) {
-                        Log::info('Message already exists, skipping', [
-                            'bitrix24_message_id' => $bitrix24MessageId
-                        ]);
+                        Log::info('Message already exists', ['message_id' => $bitrix24MessageId]);
                         continue;
                     }
                 }
 
-                // Определяем роль автора
-                $role = match($authorType) {
-                    'OPERATOR' => 'operator',
-                    'USER', 'GUEST' => 'user',
-                    default => 'system'
-                };
-
-                // Сохраняем сообщение
+                // Создаем сообщение
                 $newMessage = $conversation->messages()->create([
                     'role' => $role,
-                    'content' => $messageData['message']['text'] ?? '',
+                    'content' => $messageText,
                     'metadata' => [
                         'from_bitrix24' => true,
                         'bitrix24_message_id' => $bitrix24MessageId,
-                        'bitrix24_user_id' => $authorId,
-                        'author_type' => $authorType,
-                        'author_name' => $messageData['user']['name'] ?? null,
+                        'bitrix24_user_id' => $userId,
+                        'operator_name' => $operatorName ?? ($role === 'operator' ? 'Оператор' : null),
+                        'original_text' => $rawText,
                     ]
                 ]);
 
@@ -394,22 +589,24 @@ class Bitrix24AppService
                     $conversation->update(['status' => 'waiting_operator']);
                 }
 
-                // Обновляем счетчики
                 $conversation->increment('messages_count');
                 $conversation->update(['last_message_at' => now()]);
 
-                Log::info('Message from Bitrix24 processed', [
+                Log::info('=== Message from Bitrix24 processed ===', [
                     'conversation_id' => $conversation->id,
                     'message_id' => $newMessage->id,
                     'role' => $role,
-                    'author_type' => $authorType
+                    'content' => substr($messageText, 0, 50)
                 ]);
+                
+                // Отправляем подтверждение доставки обратно в Битрикс24
+                $this->confirmMessageDelivery($integration, $messageData);
             }
 
         } catch (\Exception $e) {
-            Log::error('Failed to handle connector message from Bitrix24', [
+            Log::error('Failed to handle connector message', [
                 'error' => $e->getMessage(),
-                'data' => $data,
+                'trace' => $e->getTraceAsString(),
             ]);
         }
     }
@@ -479,40 +676,37 @@ class Bitrix24AppService
         }
     }
     
+
     /**
      * Подтверждение доставки сообщения
      */
-    protected function confirmMessageDelivery(CrmIntegration $integration, Bot $bot, array $messageData): void
+    protected function confirmMessageDelivery(CrmIntegration $integration, array $messageData): void
     {
         try {
-            $connectorId = $this->getConnectorId($bot);
+            $connectorId = 'chatbot_1_1'; // или получите из данных
+            $lineId = 26; // или получите из данных
             
-            $botIntegration = $integration->bots()->where('bot_id', $bot->id)->first();
-            $lineId = $botIntegration->pivot->connector_settings['line_id'] ?? null;
-            
-            if (!$lineId) {
-                return;
-            }
-            
-            $this->makeRequest($integration, 'imconnector.send.status.delivery', [
+            $result = $this->makeRequest($integration, 'imconnector.send.status.delivery', [
                 'CONNECTOR' => $connectorId,
                 'LINE' => $lineId,
                 'MESSAGES' => [
                     [
-                        'im' => $messageData['im'] ?? null,
-                        'message' => [
-                            'id' => [$messageData['message']['id'] ?? null]
-                        ],
-                        'chat' => [
-                            'id' => $messageData['chat']['id'] ?? null
-                        ],
-                    ],
+                        'im' => [
+                            'chat_id' => $messageData['im']['chat_id'] ?? null,
+                            'message_id' => $messageData['im']['message_id'] ?? null,
+                        ]
+                    ]
                 ]
             ]);
             
+            Log::info('Message delivery confirmed', [
+                'result' => $result,
+                'message_id' => $messageData['im']['message_id'] ?? null
+            ]);
+            
         } catch (\Exception $e) {
-            Log::error('Failed to confirm message delivery', [
-                'error' => $e->getMessage(),
+            Log::warning('Failed to confirm message delivery', [
+                'error' => $e->getMessage()
             ]);
         }
     }
@@ -656,5 +850,142 @@ class Bitrix24AppService
                 <path fill="#6366F1" d="M35 10c-13.8 0-25 9.2-25 20.5 0 6.5 3.7 12.3 9.5 16.1l-2.4 7.4c-.2.7.5 1.3 1.2.9l8.2-4.1c2.4.5 5 .7 7.5.7 13.8 0 25-9.2 25-20.5S48.8 10 35 10zm-10 25c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm10 0c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm10 0c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3z"/>
             </svg>
         ');
+    }
+
+    public function debugConnectorInfo(CrmIntegration $integration, Bot $bot): array
+    {
+        try {
+            $connectorId = $this->getConnectorId($bot);
+            $debug = [
+                'connector_id' => $connectorId,
+                'bot_metadata' => $bot->metadata,
+            ];
+            
+            // Получаем список открытых линий
+            try {
+                $linesResult = $this->makeRequest($integration, 'imopenlines.config.list.get');
+                $debug['open_lines'] = $linesResult['result'] ?? [];
+            } catch (\Exception $e) {
+                $debug['open_lines_error'] = $e->getMessage();
+            }
+            
+            // Проверяем статус коннектора для каждой линии
+            if (!empty($debug['open_lines'])) {
+                foreach ($debug['open_lines'] as $line) {
+                    try {
+                        $lineStatus = $this->makeRequest($integration, 'imconnector.status', [
+                            'CONNECTOR' => $connectorId,
+                            'LINE' => $line['ID']
+                        ]);
+                        $debug['line_status'][$line['ID']] = $lineStatus['result'] ?? $lineStatus['error'] ?? 'Unknown';
+                    } catch (\Exception $e) {
+                        $debug['line_status'][$line['ID']] = 'Error: ' . $e->getMessage();
+                    }
+                }
+            }
+            
+            return $debug;
+            
+        } catch (\Exception $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    public function handleOpenlineWebhook(array $data): void
+    {
+        try {
+            $event = $data['event'] ?? null;
+            
+            Log::info('Processing openline webhook', [
+                'event' => $event,
+                'has_messages' => isset($data['data']['MESSAGES'])
+            ]);
+            
+            // Обработка сообщений от оператора
+            if ($event === 'ONIMCONNECTORMESSAGEADD' || isset($data['data']['MESSAGES'])) {
+                $this->processOperatorMessages($data['data'] ?? []);
+            }
+            
+        } catch (\Exception $e) {
+            Log::error('Openline webhook processing failed', [
+                'error' => $e->getMessage(),
+                'data' => $data
+            ]);
+        }
+    }
+
+    protected function processOperatorMessages(array $data): void
+    {
+        $messages = $data['MESSAGES'] ?? [];
+        
+        foreach ($messages as $messageData) {
+            try {
+                // Извлекаем ID чата
+                $chatId = $messageData['chat']['id'] ?? null;
+                
+                if (!$chatId) {
+                    continue;
+                }
+                
+                // Ищем диалог по chat_id
+                $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)
+                    ->orWhere('metadata->bitrix24_chat_id', 'chat' . $chatId)
+                    ->first();
+                    
+                if (!$conversation) {
+                    Log::warning('Conversation not found for chat_id', ['chat_id' => $chatId]);
+                    continue;
+                }
+                
+                // Проверяем, что это сообщение от оператора
+                $authorType = $messageData['user']['type'] ?? 'USER';
+                
+                if ($authorType !== 'OPERATOR') {
+                    continue;
+                }
+                
+                // Создаем сообщение от оператора в нашей системе
+                $message = $conversation->messages()->create([
+                    'role' => 'operator',
+                    'content' => $messageData['message']['text'] ?? '',
+                    'metadata' => [
+                        'from_bitrix24' => true,
+                        'bitrix24_message_id' => $messageData['message']['id'] ?? null,
+                        'operator_name' => $messageData['user']['name'] ?? 'Оператор',
+                    ]
+                ]);
+                
+                Log::info('Operator message created from webhook', [
+                    'conversation_id' => $conversation->id,
+                    'message_id' => $message->id
+                ]);
+                
+            } catch (\Exception $e) {
+                Log::error('Failed to process operator message', [
+                    'error' => $e->getMessage(),
+                    'message_data' => $messageData
+                ]);
+            }
+        }
+    }
+
+    public function checkRegisteredEvents(CrmIntegration $integration): array
+    {
+        try {
+            $result = $this->makeRequest($integration, 'event.get');
+            
+            Log::info('Registered events check', [
+                'integration_id' => $integration->id,
+                'events' => $result['result'] ?? []
+            ]);
+            
+            return $result['result'] ?? [];
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to get registered events', [
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
     }
 }

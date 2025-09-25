@@ -59,13 +59,6 @@ class CrmIntegrationController extends Controller
             'settings' => 'nullable|array',
             'bot_ids' => 'nullable|array',
             'bot_ids.*' => 'exists:bots,id',
-        ]); $request->validate([
-            'type' => 'required|in:bitrix24,amocrm,avito',
-            'name' => 'required|string|max:255',
-            'credentials' => 'required|array',
-            'settings' => 'nullable|array',
-            'bot_ids' => 'nullable|array',
-            'bot_ids.*' => 'exists:bots,id',
         ]);
 
         // Проверяем, нет ли уже интеграции этого типа
@@ -193,9 +186,23 @@ class CrmIntegrationController extends Controller
             'is_active' => 'boolean',
         ]);
 
+        // Обработка checkbox
+        $validated['is_active'] = $request->has('is_active');
+
         // Обновляем credentials только если переданы
         if ($request->has('credentials')) {
-            $validated['credentials'] = $request->credentials;
+            $credentials = $request->credentials;
+            
+            // Фильтруем пустые значения для безопасности
+            $credentials = array_filter($credentials, function($value) {
+                return !empty($value);
+            });
+            
+            if (!empty($credentials)) {
+                // Мержим с существующими credentials
+                $existingCredentials = $integration->credentials ?? [];
+                $validated['credentials'] = array_merge($existingCredentials, $credentials);
+            }
         }
 
         $integration->update($validated);
@@ -206,18 +213,44 @@ class CrmIntegrationController extends Controller
             $syncData = [];
             
             foreach ($botIds as $botId) {
-                $bot = Bot::find($botId);
+                $bot = \App\Models\Bot::find($botId);
                 if ($bot && $bot->organization_id === $organization->id) {
-                    $syncData[$botId] = [
-                        'sync_contacts' => $request->boolean("bot_settings.{$botId}.sync_contacts", true),
-                        'sync_conversations' => $request->boolean("bot_settings.{$botId}.sync_conversations", true),
-                        'create_leads' => $request->boolean("bot_settings.{$botId}.create_leads", true),
-                        'create_deals' => $request->boolean("bot_settings.{$botId}.create_deals", false),
-                        'lead_source' => $request->input("bot_settings.{$botId}.lead_source"),
-                        'responsible_user_id' => $request->input("bot_settings.{$botId}.responsible_user_id"),
-                        'pipeline_settings' => $request->input("bot_settings.{$botId}.pipeline_settings", []),
-                        'is_active' => $request->boolean("bot_settings.{$botId}.is_active", true),
+                    // Получаем существующие настройки для бота
+                    $existingSettings = $integration->bots()
+                        ->where('bot_id', $botId)
+                        ->first();
+                    
+                    $botSettings = [
+                        'sync_contacts' => $request->input("bot_settings.{$botId}.sync_contacts", 
+                            $existingSettings ? $existingSettings->pivot->sync_contacts : true),
+                        'sync_conversations' => $request->input("bot_settings.{$botId}.sync_conversations", 
+                            $existingSettings ? $existingSettings->pivot->sync_conversations : true),
+                        'create_leads' => $request->input("bot_settings.{$botId}.create_leads", 
+                            $existingSettings ? $existingSettings->pivot->create_leads : true),
+                        'create_deals' => $request->input("bot_settings.{$botId}.create_deals", 
+                            $existingSettings ? $existingSettings->pivot->create_deals : false),
+                        'lead_source' => $request->input("bot_settings.{$botId}.lead_source", 
+                            $existingSettings ? $existingSettings->pivot->lead_source : null),
+                        'responsible_user_id' => $request->input("bot_settings.{$botId}.responsible_user_id", 
+                            $existingSettings ? $existingSettings->pivot->responsible_user_id : null),
+                        'is_active' => $request->input("bot_settings.{$botId}.is_active", 
+                            $existingSettings ? $existingSettings->pivot->is_active : true),
                     ];
+                    
+                    // Конвертируем массивы в JSON для полей, которые должны быть JSON
+                    $pipelineSettings = $request->input("bot_settings.{$botId}.pipeline_settings", 
+                        $existingSettings ? $existingSettings->pivot->pipeline_settings : []);
+                    if (is_array($pipelineSettings)) {
+                        $botSettings['pipeline_settings'] = json_encode($pipelineSettings);
+                    }
+                    
+                    $connectorSettings = $request->input("bot_settings.{$botId}.connector_settings", 
+                        $existingSettings ? $existingSettings->pivot->connector_settings : []);
+                    if (is_array($connectorSettings)) {
+                        $botSettings['connector_settings'] = json_encode($connectorSettings);
+                    }
+                    
+                    $syncData[$botId] = $botSettings;
                 }
             }
             
@@ -469,7 +502,7 @@ class CrmIntegrationController extends Controller
 
         $validated = $request->validate([
             'sync_contacts' => 'boolean',
-            'sync_conversations' => 'boolean',
+            'sync_conversations' => 'boolean', 
             'create_leads' => 'boolean',
             'create_deals' => 'boolean',
             'lead_source' => 'nullable|string',
@@ -478,7 +511,23 @@ class CrmIntegrationController extends Controller
             'is_active' => 'boolean',
         ]);
 
-        $integration->bots()->updateExistingPivot($bot->id, $validated);
+        // Обработка checkboxes - если не отмечен, значит false
+        $updateData = [
+            'sync_contacts' => $request->has('sync_contacts'),
+            'sync_conversations' => $request->has('sync_conversations'),
+            'create_leads' => $request->has('create_leads'),
+            'create_deals' => $request->has('create_deals'),
+            'lead_source' => $validated['lead_source'] ?? null,
+            'responsible_user_id' => $validated['responsible_user_id'] ?? null,
+            'is_active' => $request->has('is_active'),
+        ];
+        
+        // Конвертируем pipeline_settings в JSON
+        if (isset($validated['pipeline_settings'])) {
+            $updateData['pipeline_settings'] = json_encode($validated['pipeline_settings']);
+        }
+
+        $integration->bots()->updateExistingPivot($bot->id, $updateData);
 
         return redirect()
             ->route('crm.show', [$organization, $integration])

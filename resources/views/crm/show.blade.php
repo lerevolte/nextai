@@ -534,6 +534,141 @@ function deleteIntegration() {
 function refreshLogs() {
     location.reload();
 }
+
+function showAddBotModal() {
+    // Создаем модальное окно
+    const modal = document.createElement('div');
+    modal.id = 'addBotModal';
+    modal.className = 'fixed inset-0 z-50 overflow-y-auto';
+    modal.innerHTML = `
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeAddBotModal()"></div>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <form method="POST" action="{{ route('crm.update', [$organization, $integration]) }}">
+                    @csrf
+                    @method('PUT')
+                    <input type="hidden" name="name" value="{{ $integration->name }}">
+                    <input type="hidden" name="is_active" value="{{ $integration->is_active ? '1' : '0' }}">
+                    
+                    <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">
+                            Добавить бота к интеграции
+                        </h3>
+                        <div class="space-y-2">
+                            @php
+                                $availableBots = $organization->bots()->whereNotIn('id', $integration->bots->pluck('id'))->get();
+                            @endphp
+                            @forelse($availableBots as $bot)
+                                <label class="flex items-center p-2 hover:bg-gray-50 rounded">
+                                    <input type="checkbox" name="bot_ids[]" value="{{ $bot->id }}" 
+                                           class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                    <span class="ml-2">{{ $bot->name }}</span>
+                                </label>
+                            @empty
+                                <p class="text-gray-500 text-sm">Все боты уже подключены к этой интеграции</p>
+                            @endforelse
+                            
+                            @foreach($integration->bots as $bot)
+                                <input type="hidden" name="bot_ids[]" value="{{ $bot->id }}">
+                            @endforeach
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                        <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm">
+                            Добавить
+                        </button>
+                        <button type="button" onclick="closeAddBotModal()" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                            Отмена
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeAddBotModal() {
+    const modal = document.getElementById('addBotModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function removeBotConnection(botId) {
+    if (!confirm('Удалить подключение этого бота к интеграции?')) {
+        return;
+    }
+    
+    // Создаем форму для отправки
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ route("crm.update", [$organization, $integration]) }}';
+    
+    // CSRF token
+    const csrfToken = document.createElement('input');
+    csrfToken.type = 'hidden';
+    csrfToken.name = '_token';
+    csrfToken.value = '{{ csrf_token() }}';
+    form.appendChild(csrfToken);
+    
+    // Method override
+    const methodInput = document.createElement('input');
+    methodInput.type = 'hidden';
+    methodInput.name = '_method';
+    methodInput.value = 'PUT';
+    form.appendChild(methodInput);
+    
+    // Name
+    const nameInput = document.createElement('input');
+    nameInput.type = 'hidden';
+    nameInput.name = 'name';
+    nameInput.value = '{{ $integration->name }}';
+    form.appendChild(nameInput);
+    
+    // Is active
+    const activeInput = document.createElement('input');
+    activeInput.type = 'hidden';
+    activeInput.name = 'is_active';
+    activeInput.value = '{{ $integration->is_active ? "1" : "0" }}';
+    form.appendChild(activeInput);
+    
+    // Bot IDs (все кроме удаляемого)
+    @foreach($integration->bots as $bot)
+        if ({{ $bot->id }} !== botId) {
+            const botInput = document.createElement('input');
+            botInput.type = 'hidden';
+            botInput.name = 'bot_ids[]';
+            botInput.value = '{{ $bot->id }}';
+            form.appendChild(botInput);
+        }
+    @endforeach
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function syncEntity(entityType, localId) {
+    fetch('{{ route("crm.sync-conversation", [$organization, $integration]) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            conversation_id: localId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ Синхронизация выполнена');
+            location.reload();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    });
+}
 </script>
 @endpush
 @endsection

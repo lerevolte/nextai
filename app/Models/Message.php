@@ -92,18 +92,61 @@ class Message extends Model
 
     public function getFormattedContent(): string
     {
-        // Форматирование контента для отображения
-        $content = e($this->content);
+        $content = $this->content;
         
-        // Преобразуем переносы строк в <br>
-        $content = nl2br($content);
-        
-        // Преобразуем ссылки в кликабельные
+        // 1. Сначала обрабатываем markdown ссылки [текст](url)
         $content = preg_replace(
-            '/(https?:\/\/[^\s]+)/',
-            '<a href="$1" target="_blank" class="text-blue-600 hover:underline">$1</a>',
+            '/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/i',
+            '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 underline">$1</a>',
             $content
         );
+        
+        // 2. Затем обрабатываем обычные ссылки
+        $content = preg_replace(
+            '/(https?:\/\/[^\s\<\>\[\]]+)/i',
+            '<a href="$1" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 underline">$1</a>',
+            $content
+        );
+        
+        // 3. Обрабатываем изображения отдельно (ссылки на .jpg, .png, .gif, .webp)
+        $content = preg_replace_callback(
+            '/<a[^>]+href="([^"]+\.(jpg|jpeg|png|gif|webp|svg))"[^>]*>([^<]+)<\/a>/i',
+            function($matches) {
+                $imageUrl = $matches[1];
+                $linkText = $matches[3];
+                return '<div class="image-container my-2">
+                            <img src="' . htmlspecialchars($imageUrl) . '" 
+                                 alt="' . htmlspecialchars($linkText) . '" 
+                                 class="max-w-full h-auto rounded-lg cursor-pointer"
+                                 onclick="window.open(\'' . htmlspecialchars($imageUrl) . '\', \'_blank\')" 
+                                 loading="lazy">
+                            <div class="text-xs text-gray-500 mt-1">' . htmlspecialchars($linkText) . '</div>
+                        </div>';
+            },
+            $content
+        );
+        
+        // 4. Обрабатываем прямые ссылки на изображения (без markdown)
+        $content = preg_replace_callback(
+            '/(https?:\/\/[^\s\<\>]+\.(jpg|jpeg|png|gif|webp|svg))/i',
+            function($matches) {
+                $imageUrl = $matches[1];
+                return '<div class="image-container my-2">
+                            <img src="' . htmlspecialchars($imageUrl) . '" 
+                                 alt="Изображение" 
+                                 class="max-w-full h-auto rounded-lg cursor-pointer"
+                                 onclick="window.open(\'' . htmlspecialchars($imageUrl) . '\', \'_blank\')" 
+                                 loading="lazy">
+                        </div>';
+            },
+            $content
+        );
+        
+        // 5. Преобразуем markdown bold (**текст**) в HTML
+        $content = preg_replace('/\*\*([^\*]+)\*\*/', '<strong>$1</strong>', $content);
+        
+        // 6. Преобразуем переносы строк в <br>
+        $content = nl2br($content);
         
         return $content;
     }

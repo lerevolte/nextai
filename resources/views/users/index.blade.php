@@ -1,75 +1,146 @@
-{{-- resources/views/users/index.blade.php --}}
 @extends('layouts.app')
 
 @section('title', 'Пользователи')
 
 @section('content')
-<div style="padding: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="font-size: 24px;">Пользователи организации</h2>
-        @can('users.create')
-        <a href="{{ route('users.create') }}" 
-           style="padding: 10px 20px; background: #10b981; color: white; text-decoration: none; border-radius: 5px;">
-            + Добавить пользователя
-        </a>
-        @endcan
-    </div>
-
-    <div style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
-        <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr style="background: #f3f4f6;">
-                    <th style="padding: 12px; text-align: left;">Имя</th>
-                    <th style="padding: 12px; text-align: left;">Email</th>
-                    <th style="padding: 12px; text-align: left;">Роль</th>
-                    <th style="padding: 12px; text-align: left;">Статус</th>
-                    <th style="padding: 12px; text-align: left;">Последний вход</th>
-                    <th style="padding: 12px; text-align: left;">Действия</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse($users as $user)
-                <tr style="border-top: 1px solid #e5e7eb;">
-                    <td style="padding: 12px;">{{ $user->name }}</td>
-                    <td style="padding: 12px;">{{ $user->email }}</td>
-                    <td style="padding: 12px;">
-                        @foreach($user->roles as $role)
-                            <span style="padding: 2px 8px; background: #e0e7ff; color: #3730a3; border-radius: 4px; font-size: 12px;">
-                                {{ $role->name }}
-                            </span>
-                        @endforeach
-                    </td>
-                    <td style="padding: 12px;">
-                        <span style="padding: 2px 8px; background: {{ $user->is_active ? '#d1fae5' : '#fee2e2' }}; color: {{ $user->is_active ? '#065f46' : '#991b1b' }}; border-radius: 4px; font-size: 12px;">
-                            {{ $user->is_active ? 'Активен' : 'Неактивен' }}
-                        </span>
-                    </td>
-                    <td style="padding: 12px;">
-                        {{ $user->last_login_at ? $user->last_login_at->format('d.m.Y H:i') : 'Никогда' }}
-                    </td>
-                    <td style="padding: 12px;">
-                        @can('users.update')
-                        <a href="{{ route('users.edit', $user) }}" style="color: #6366f1; text-decoration: none; margin-right: 10px;">
-                            Изменить
-                        </a>
-                        @endcan
-                    </td>
-                </tr>
-                @empty
-                <tr>
-                    <td colspan="6" style="padding: 20px; text-align: center; color: #6b7280;">
-                        Пользователи не найдены
-                    </td>
-                </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-
-    @if($users->hasPages())
-        <div style="margin-top: 20px;">
-            {{ $users->links() }}
+<div class="py-12">
+    <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-900">Пользователи организации</h2>
+            <a href="{{ route('organization.users.create') }}" 
+               class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                + Добавить пользователя
+            </a>
         </div>
-    @endif
+
+        @if(session('success'))
+            <div class="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+                {{ session('success') }}
+            </div>
+        @endif
+
+        @if(session('error'))
+            <div class="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+                {{ session('error') }}
+            </div>
+        @endif
+
+        <div class="bg-white shadow-sm rounded-lg overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Пользователь
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Роль
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Статус
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Последний вход
+                        </th>
+                        <th class="relative px-6 py-3">
+                            <span class="sr-only">Действия</span>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    @foreach($users as $user)
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0 h-10 w-10">
+                                    <div class="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center">
+                                        <span class="text-white font-medium">
+                                            {{ substr($user->name, 0, 1) }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="ml-4">
+                                    <div class="text-sm font-medium text-gray-900">
+                                        {{ $user->name }}
+                                    </div>
+                                    <div class="text-sm text-gray-500">
+                                        {{ $user->email }}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            @if($user->hasRole('owner'))
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
+                                    Владелец
+                                </span>
+                            @elseif($user->hasRole('admin'))
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                                    Администратор
+                                </span>
+                            @elseif($user->hasRole('operator'))
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    Оператор
+                                </span>
+                            @else
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                                    Пользователь
+                                </span>
+                            @endif
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            @if($user->is_active)
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    Активен
+                                </span>
+                            @else
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                                    Заблокирован
+                                </span>
+                            @endif
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {{ $user->last_login_at ? $user->last_login_at->diffForHumans() : 'Никогда' }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <div class="flex justify-end space-x-2">
+                                <a href="{{ route('organization.users.edit', $user) }}" 
+                                   class="text-indigo-600 hover:text-indigo-900">
+                                    Изменить
+                                </a>
+                                @if(!$user->hasRole('owner') && $user->id !== auth()->id())
+                                <form method="POST" action="{{ route('organization.users.destroy', $user) }}" 
+                                      onsubmit="return confirm('Удалить пользователя?')" 
+                                      class="inline">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="text-red-600 hover:text-red-900">
+                                        Удалить
+                                    </button>
+                                </form>
+                                @endif
+                            </div>
+                        </td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+
+        @if($users->hasPages())
+            <div class="mt-4">
+                {{ $users->links() }}
+            </div>
+        @endif
+
+        <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h3 class="text-sm font-medium text-blue-900 mb-2">Роли пользователей:</h3>
+            <ul class="text-sm text-blue-700 space-y-1">
+                <li><strong>Владелец:</strong> Полный доступ ко всем функциям</li>
+                <li><strong>Администратор:</strong> Управление ботами, пользователями и настройками</li>
+                <li><strong>Оператор:</strong> Работа с диалогами и клиентами</li>
+                <li><strong>Пользователь:</strong> Просмотр статистики и отчетов</li>
+            </ul>
+        </div>
+    </div>
 </div>
 @endsection

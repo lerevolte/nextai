@@ -331,4 +331,67 @@ class WidgetController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    public function pollMessages(Request $request, Bot $bot)
+    {
+        $request->validate([
+            'session_id' => 'required|string',
+            'last_message_id' => 'nullable|integer',
+        ]);
+        
+        // Log::info('Poll request received', [
+        //     'bot_id' => $bot->id,
+        //     'session_id' => $request->session_id,
+        //     'last_message_id' => $request->last_message_id
+        // ]);
+        
+        $channel = $bot->channels()->where('type', 'web')->where('is_active', true)->first();
+        if (!$channel) {
+            return response()->json(['error' => 'Channel not available'], 404);
+        }
+        
+        $conversation = Conversation::where('bot_id', $bot->id)
+            ->where('channel_id', $channel->id)
+            ->where('external_id', $request->session_id)
+            ->first();
+            
+        if (!$conversation) {
+            Log::warning('Conversation not found for polling', [
+                'bot_id' => $bot->id,
+                'session_id' => $request->session_id
+            ]);
+            return response()->json(['error' => 'Conversation not found'], 404);
+        }
+        
+        $query = $conversation->messages();
+        
+        if ($request->last_message_id) {
+            $query->where('id', '>', $request->last_message_id);
+        }
+        
+        $messages = $query->orderBy('created_at', 'asc')->get()
+            ->map(function ($message) {
+                return [
+                    'id' => $message->id,
+                    'role' => $message->role,
+                    'content' => $message->content,
+                    'created_at' => $message->created_at->toIso8601String(),
+                    'metadata' => [
+                        'operator_name' => $message->metadata['operator_name'] ?? null,
+                        'from_bitrix24' => $message->metadata['from_bitrix24'] ?? false,
+                    ]
+                ];
+            });
+        
+        // Log::info('Poll response', [
+        //     'conversation_id' => $conversation->id,
+        //     'messages_count' => $messages->count(),
+        //     'last_message_id' => $messages->last()?->get('id')
+        // ]);
+        
+        return response()->json([
+            'messages' => $messages,
+            'conversation_status' => $conversation->status,
+        ]);
+    }
 }

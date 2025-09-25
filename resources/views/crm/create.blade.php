@@ -191,9 +191,9 @@
                                value="{{ old('credentials.bot_id') }}"
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg"
                                placeholder="Идентификатор вашего бота">
-                        <p class="mt-1 text-xs text-gray-500">
+                        <!-- <p class="mt-1 text-xs text-gray-500">
                             ID бота можно найти в настройках Salebot
-                        </p>
+                        </p> -->
                     </div>
 
                     <div class="mb-4">
