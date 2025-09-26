@@ -30,6 +30,7 @@ Route::prefix('widget')->group(function () {
     Route::post('/{bot:slug}/message', [WidgetController::class, 'sendMessage'])->name('widget.message');
     Route::post('/{bot:slug}/end', [WidgetController::class, 'endConversation'])->name('widget.end');
     Route::post('/{bot:slug}/poll', [WidgetController::class, 'pollMessages'])->name('widget.poll');
+    Route::post('/{bot:slug}/confirm-delivery', [WidgetController::class, 'confirmDelivery'])->name('widget.confirm-delivery');
 });
 
 
@@ -329,28 +330,44 @@ Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
         Route::get('/conversations/{conversation}/messages', [ConversationController::class, 'messages']);
     });
 });
-Route::get('/test/bitrix24-events/{integration}', function($integrationId) {
-    $integration = \App\Models\CrmIntegration::find($integrationId);
+Route::get('/test/bitrix24-events/{botId}', function($botId) {
+    echo url('/webhooks/crm/bitrix24/connector/handler');
+    die();
+    $bot = \App\Models\Bot::find($botId);
+    if (!$bot) {
+        return 'Bot not found';
+    }
+
+    $integration = $bot->organization->crmIntegrations()
+        ->where('type', 'bitrix24')->first();
+
     if (!$integration) {
-        return 'Integration not found';
+        return 'Integration not found for this bot';
     }
     
     $appService = app(\App\Services\Bitrix24\Bitrix24AppService::class);
     
-    // Проверяем зарегистрированные события
-    $events = $appService->checkRegisteredEvents($integration);
-    
-    // Пробуем зарегистрировать события заново
-    $appService->registerEventHandlers($integration);
-    
-    // Проверяем снова
-    $eventsAfter = $appService->checkRegisteredEvents($integration);
-    
-    return response()->json([
-        'before' => $events,
-        'after' => $eventsAfter,
-        'integration' => $integration->id
-    ]);
+    try {
+        Log::info("Attempting to unregister connector for bot #{$botId}");
+        // Сначала полностью удаляем старую регистрацию из Битрикс24
+        $appService->unregisterConnector($integration, $bot);
+        
+        Log::info("Attempting to re-register connector for bot #{$botId}");
+        // Теперь регистрируем заново с правильными обработчиками
+        $result = $appService->registerConnector($integration, $bot);
+        
+        Log::info("Re-registration result", ['result' => $result]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Bot handlers have been reset. Please check if messaging works now.',
+            'result' => $result
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Manual bot fix failed', ['error' => $e->getMessage()]);
+        return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+    }
 })->middleware('auth');
 Route::any('/test/bitrix24-webhook', function(Request $request) {
     Log::info('=== TEST: Bitrix24 webhook received ===', [

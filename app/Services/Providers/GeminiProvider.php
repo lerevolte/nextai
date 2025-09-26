@@ -181,4 +181,3 @@ class GeminiProvider implements AIProviderInterface
         return (int) (mb_strlen($text) / 4);
     }
 }
-

@@ -50,27 +50,44 @@ class WidgetController extends Controller
             return response()->json(['error' => 'Bot is not active'], 400);
         }
 
+        // Получаем веб-канал
         $channel = $bot->channels()
             ->where('type', 'web')
             ->where('is_active', true)
             ->firstOrFail();
 
         $sessionId = $request->input('session_id');
-        $userInfo = $request->input('user_info', []);
         $conversation = null;
+        $userInfo = $request->input('user_info', []);
 
         // Пытаемся найти существующий АКТИВНЫЙ диалог
         if ($sessionId) {
             $conversation = Conversation::where('external_id', $sessionId)
                 ->where('bot_id', $bot->id)
                 ->where('channel_id', $channel->id)
-                ->where('status', 'active')
+                ->where('status', 'active') // Только активные диалоги
                 ->first();
+                
+            Log::info('Looking for existing conversation', [
+                'session_id' => $sessionId,
+                'bot_id' => $bot->id,
+                'channel_id' => $channel->id,
+                'found' => $conversation ? true : false
+            ]);
         }
 
-        // Если диалог не найден И переданы данные пользователя - создаем новый
-        if (!$conversation && !empty($userInfo['name'])) {
-            $sessionId = $sessionId ?: Str::uuid()->toString();
+        // Если диалог не найден, создаем новый
+        if (!$conversation) {
+            // Если session_id не был предоставлен, генерируем новый
+            if (!$sessionId) {
+                $sessionId = Str::uuid()->toString();
+            }
+            
+            Log::info('Creating new conversation', [
+                'session_id' => $sessionId,
+                'bot_id' => $bot->id,
+                'user_info' => $userInfo
+            ]);
             
             $conversation = Conversation::create([
                 'bot_id' => $bot->id,
@@ -81,60 +98,60 @@ class WidgetController extends Controller
                 'user_email' => $userInfo['email'] ?? null,
                 'user_phone' => $userInfo['phone'] ?? null,
                 'user_data' => $userInfo,
-                'metadata' => [
-                    'widget_initialized' => true,
-                    'initialization_date' => now()->toIso8601String(),
-                ]
             ]);
             
-            // Создаем приветственное сообщение локально (НЕ отправляем в Битрикс24)
+            // Создаем приветственное сообщение если есть
             if ($bot->welcome_message) {
                 $conversation->messages()->create([
                     'role' => 'assistant',
                     'content' => $bot->welcome_message,
-                    'metadata' => ['is_welcome' => true]
                 ]);
                 $conversation->increment('messages_count');
             }
+            
+        } else {
+            // Диалог найден. Обновляем контактные данные если нужно
+            $needsUpdate = false;
+            $updateData = [];
+            
+            if (!empty($userInfo['name']) && empty($conversation->user_name)) {
+                $updateData['user_name'] = $userInfo['name'];
+                $needsUpdate = true;
+            }
+            
+            if (!empty($userInfo['email']) && empty($conversation->user_email)) {
+                $updateData['user_email'] = $userInfo['email'];
+                $needsUpdate = true;
+            }
+            
+            if (!empty($userInfo['phone']) && empty($conversation->user_phone)) {
+                $updateData['user_phone'] = $userInfo['phone'];
+                $needsUpdate = true;
+            }
+            
+            if ($needsUpdate) {
+                $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
+                $conversation->update($updateData);
+                
+                Log::info('Updated conversation user data', [
+                    'conversation_id' => $conversation->id,
+                    'updates' => $updateData
+                ]);
+            }
         }
 
-        // Если диалог найден или создан - возвращаем данные
-        if ($conversation) {
-            $messages = $conversation->messages()
-                ->orderBy('created_at', 'asc')
-                ->get()
-                ->map(function ($message) {
-                    return [
-                        'id' => $message->id,
-                        'role' => $message->role,
-                        'content' => $message->content,
-                        'created_at' => $message->created_at->toIso8601String(),
-                        'metadata' => [
-                            'operator_name' => $message->metadata['operator_name'] ?? null,
-                        ]
-                    ];
-                });
+        $messages = $conversation->messages()
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(function ($message) {
+                return [
+                    'id' => $message->id,
+                    'role' => $message->role,
+                    'content' => $message->content,
+                    'created_at' => $message->created_at->toIso8601String(),
+                ];
+            });
 
-            return response()->json([
-                'session_id' => $sessionId,
-                'bot' => [
-                    'name' => $bot->name,
-                    'avatar_url' => $bot->avatar_url,
-                    'welcome_message' => null, // НЕ отправляем дублирующее приветствие
-                    'collect_contacts' => $bot->collect_contacts,
-                ],
-                'settings' => $channel->settings ?? [],
-                'messages' => $messages,
-                'conversation_id' => $conversation->id,
-                'user_info' => [
-                    'name' => $conversation->user_name,
-                    'email' => $conversation->user_email,
-                    'phone' => $conversation->user_phone,
-                ],
-            ]);
-        }
-
-        // Если нет диалога и нет данных пользователя - возвращаем настройки для показа формы
         return response()->json([
             'session_id' => $sessionId,
             'bot' => [
@@ -144,9 +161,13 @@ class WidgetController extends Controller
                 'collect_contacts' => $bot->collect_contacts,
             ],
             'settings' => $channel->settings ?? [],
-            'messages' => [],
-            'conversation_id' => null,
-            'user_info' => null,
+            'messages' => $messages,
+            'conversation_id' => $conversation->id,
+            'user_info' => $conversation->user_name ? [
+                'name' => $conversation->user_name,
+                'email' => $conversation->user_email,
+                'phone' => $conversation->user_phone,
+            ] : null,
         ]);
     }
 
@@ -317,12 +338,13 @@ class WidgetController extends Controller
             'session_id' => 'required|string',
             'last_message_id' => 'nullable|integer',
         ]);
-        Log::info('=== Poll request ===', [
-            'bot_slug' => $bot->slug,
+        
+        Log::info('Poll request received', [
+            'bot_id' => $bot->id,
             'session_id' => $request->session_id,
             'last_message_id' => $request->last_message_id
         ]);
-    
+        
         $channel = $bot->channels()->where('type', 'web')->where('is_active', true)->first();
         if (!$channel) {
             return response()->json(['error' => 'Channel not available'], 404);
@@ -357,6 +379,7 @@ class WidgetController extends Controller
                     'metadata' => [
                         'operator_name' => $message->metadata['operator_name'] ?? null,
                         'from_bitrix24' => $message->metadata['from_bitrix24'] ?? false,
+                        'bitrix24_message_id' => $message->metadata['bitrix24_message_id'] ?? null,
                     ]
                 ];
             });
@@ -371,5 +394,46 @@ class WidgetController extends Controller
             'messages' => $messages,
             'conversation_status' => $conversation->status,
         ]);
+    }
+
+    public function confirmDelivery(Request $request, Bot $bot)
+    {
+        $request->validate([
+            'session_id' => 'required|string',
+            'b24_message_ids' => 'required|array',
+        ]);
+
+        $b24MessageIds = array_filter($request->input('b24_message_ids'));
+
+        if (empty($b24MessageIds)) {
+            return response()->json(['success' => true, 'message' => 'No IDs to confirm.']);
+        }
+
+        try {
+            $conversation = Conversation::where('bot_id', $bot->id)
+                ->where('external_id', $request->session_id)
+                ->firstOrFail();
+
+            $integration = $bot->crmIntegrations()
+                ->where('type', 'bitrix24')
+                ->wherePivot('is_active', true)
+                ->first();
+
+            if (!$integration) {
+                return response()->json(['success' => false, 'error' => 'Active Bitrix24 integration not found.'], 404);
+            }
+            
+            $provider = new \App\Services\CRM\Providers\Bitrix24ConnectorProvider($integration);
+            $provider->confirmMessageDeliveryFromWidget($conversation, $b24MessageIds);
+
+            return response()->json(['success' => true]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to confirm message delivery to Bitrix24', [
+                'session_id' => $request->session_id,
+                'error' => $e->getMessage()
+            ]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
     }
 }

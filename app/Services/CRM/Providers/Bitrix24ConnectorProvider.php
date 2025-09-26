@@ -185,6 +185,7 @@ class Bitrix24ConnectorProvider
                 'LINE' => $lineId,
                 'MESSAGES' => $messagesToSend,
             ]);
+            
 
             Log::info("STEP 7: Messages sent result", [
                 'conversation_id' => $conversationId,
@@ -195,6 +196,7 @@ class Bitrix24ConnectorProvider
                 throw new \Exception('Failed to send message to Bitrix24: ' . json_encode($result));
             }
 
+            // Сохраняем метаданные о создании чата
             if (!empty($result['result']['DATA']['RESULT'][0])) {
                 $resultData = $result['result']['DATA']['RESULT'][0];
                 $sessionData = $resultData['session'] ?? null;
@@ -222,7 +224,6 @@ class Bitrix24ConnectorProvider
                     ]);
                 }
             }
-
 
             Log::info("=== END sendInitialMessage SUCCESS ===", [
                 'conversation_id' => $conversationId,
@@ -474,6 +475,7 @@ class Bitrix24ConnectorProvider
             'error' => 'All API methods failed'
         ];
     }
+
     protected function sendAsUserMessage(Conversation $conversation, Message $message): array
     {
         Log::info('sendAsUserMessage to Bitrix24', [
@@ -566,6 +568,7 @@ class Bitrix24ConnectorProvider
      */
     protected function sendAsSystemMessage(Conversation $conversation, Message $message): array
     {
+        // НЕ отправляем через коннектор если чат уже создан
         if ($conversation->metadata['bitrix24_chat_id'] ?? false) {
             Log::warning("Cannot send system message - chat already exists, would create duplicate", [
                 'conversation_id' => $conversation->id,
@@ -832,5 +835,51 @@ class Bitrix24ConnectorProvider
         return 'chatbot_' . $bot->organization_id . '_' . $bot->id;
     }
 
-    
+    /**
+     * Подтверждение доставки сообщения, инициированное виджетом
+     */
+    public function confirmMessageDeliveryFromWidget(Conversation $conversation, array $bitrix24MessageIds): array
+    {
+        try {
+            $bot = $conversation->bot;
+            $connectorId = $this->getConnectorIdForBot($bot);
+
+            $botIntegration = $this->integration->bots()->where('bot_id', $bot->id)->first();
+            $lineId = $conversation->metadata['bitrix24_line_id'] ?? null;
+            $chatId = $conversation->metadata['bitrix24_chat_id'] ?? null; // Реальный ID чата (число)
+            $ourChatId = 'chat_' . $conversation->id; // Наш ID чата (строка)
+
+            if (!$lineId || !$chatId) {
+                throw new \Exception('Line ID or Chat ID not found in conversation metadata');
+            }
+
+            $messagesPayload = [];
+            foreach ($bitrix24MessageIds as $msgId) {
+                $messagesPayload[] = [
+                    'im' => ['chat_id' => $chatId, 'message_id' => $msgId],
+                    'message' => ['id' => [$msgId]],
+                    'chat' => ['id' => $ourChatId],
+                ];
+            }
+
+            Log::info('Confirming message delivery to Bitrix24', [
+                'connector_id' => $connectorId,
+                'line_id' => $lineId,
+                'messages_count' => count($messagesPayload)
+            ]);
+
+            return $this->makeRequest('imconnector.send.status.delivery', [
+                'CONNECTOR' => $connectorId,
+                'LINE' => $lineId,
+                'MESSAGES' => $messagesPayload,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to confirm message delivery from widget', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

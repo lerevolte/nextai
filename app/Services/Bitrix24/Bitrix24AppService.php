@@ -71,46 +71,33 @@ class Bitrix24AppService
     {
         try {
             $botCode = 'chatbot_' . $bot->organization_id . '_' . $bot->id;
-        
-            // Проверяем, не зарегистрирован ли уже бот
-            if ($bot->metadata['bitrix24_bot_id'] ?? false) {
-                // Проверяем, существует ли бот в Битрикс24
-                try {
-                    $checkResult = $this->makeRequest($integration, 'imbot.bot.list');
-                    $botExists = false;
-                    
-                    if (!empty($checkResult['result'])) {
-                        foreach ($checkResult['result'] as $b24bot) {
-                            if ($b24bot['ID'] == $bot->metadata['bitrix24_bot_id']) {
-                                $botExists = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if ($botExists) {
-                        return [
-                            'success' => true,
-                            'bot_id' => $bot->metadata['bitrix24_bot_id'],
-                            'message' => 'Bot already registered'
-                        ];
-                    }
-                    
-                    // Если бот не существует в Битрикс24, удаляем старый ID
-                    $metadata = $bot->metadata ?? [];
-                    unset($metadata['bitrix24_bot_id']);
-                    unset($metadata['bitrix24_bot_registered_at']);
-                    $bot->update(['metadata' => $metadata]);
-                    
-                } catch (\Exception $e) {
-                    Log::warning('Could not check bot existence', ['error' => $e->getMessage()]);
-                }
+            Log::info("[B24AppService] RegisterChatBot: Start", ['bot_id' => $bot->id, 'bot_code' => $botCode]);
+
+            // 1. Сначала пытаемся удалить любого старого бота с тем же кодом, чтобы обеспечить чистоту.
+            // Это безопаснее, чем пытаться найти и повторно использовать старого.
+            try {
+                Log::info("[B24AppService] RegisterChatBot: Attempting to unregister any existing bot with the same code", ['bot_code' => $botCode]);
+                // Используем метод imbot.unregister, который может работать с CODE
+                $this->makeRequest($integration, 'imbot.unregister', ['CODE' => $botCode]);
+                // Нам не важен результат, это просто шаг очистки.
+            } catch (\Exception $e) {
+                Log::warning("[B24AppService] RegisterChatBot: Cleanup unregister failed (this is often OK)", ['error' => $e->getMessage()]);
             }
             
-            // Регистрируем бота с правильными параметрами для открытых линий
+            // 2. Очищаем любой устаревший ID бота из нашей базы данных.
+            if ($bot->metadata['bitrix24_bot_id'] ?? false) {
+                 $metadata = $bot->metadata;
+                 unset($metadata['bitrix24_bot_id']);
+                 unset($metadata['bitrix24_bot_registered_at']);
+                 $bot->update(['metadata' => $metadata]);
+                 Log::info("[B24AppService] RegisterChatBot: Cleared stale bot ID from local DB", ['bot_id' => $bot->id]);
+            }
+
+            // 3. Теперь регистрируем бота.
+            Log::info("[B24AppService] RegisterChatBot: Making 'imbot.register' request");
             $result = $this->makeRequest($integration, 'imbot.register', [
                 'CODE' => $botCode,
-                'TYPE' => 'O', // ВАЖНО: Тип 'O' для бота открытых линий, а не 'B'
+                'TYPE' => 'O', // ВАЖНО: Тип 'O' для бота открытых линий
                 'EVENT_MESSAGE_ADD' => url('/bitrix24/bot-handler'),
                 'EVENT_WELCOME_MESSAGE' => url('/bitrix24/bot-welcome'),
                 'EVENT_BOT_DELETE' => url('/bitrix24/bot-delete'),
@@ -123,28 +110,29 @@ class Bitrix24AppService
                 ]
             ]);
 
+            Log::info("[B24AppService] RegisterChatBot: 'imbot.register' response", ['result' => $result]);
+
+            // 4. Корректно обрабатываем ответ.
             if (!empty($result['result'])) {
-                // Сохраняем ID бота
+                // УСПЕХ!
+                $newBotId = $result['result'];
                 $bot->update([
                     'metadata' => array_merge($bot->metadata ?? [], [
-                        'bitrix24_bot_id' => $result['result'],
+                        'bitrix24_bot_id' => $newBotId,
                         'bitrix24_bot_registered_at' => now()->toIso8601String(),
                     ])
                 ]);
 
-                Log::info('Chatbot registered in Bitrix24', [
-                    'bot_id' => $bot->id,
-                    'bitrix24_bot_id' => $result['result']
-                ]);
-
+                Log::info("[B24AppService] RegisterChatBot: Success!", ['bot_id' => $bot->id, 'new_b24_bot_id' => $newBotId]);
                 return [
                     'success' => true,
-                    'bot_id' => $result['result'],
+                    'bot_id' => $newBotId,
                     'message' => 'Чат-бот успешно зарегистрирован'
                 ];
             }
-
-            throw new \Exception('Failed to register bot: ' . json_encode($result));
+            
+            // Если мы дошли до сюда, это настоящая ошибка.
+            throw new \Exception('Failed to register bot. API Response: ' . json_encode($result));
 
         } catch (\Exception $e) {
             Log::error('Failed to register chatbot', [
@@ -503,10 +491,9 @@ class Bitrix24AppService
                     $operatorName = $matches[1];
                     $messageText = trim($matches[2]);
                 } else {
-                    // Просто убираем все BB-коды
+                    // Просто убираем BB-коды
                     $messageText = preg_replace('/\[br\]/i', "\n", $messageText);
-                    $messageText = preg_replace('/\[b\](.*?)\[\/b\]/i', '$1', $messageText);
-                    $messageText = preg_replace('/\[\/?[a-z]+\]/i', '', $messageText);
+                    $messageText = preg_replace('/\[\/?b\]/i', '', $messageText);
                 }
                 
                 Log::info('Processing message', [
@@ -610,6 +597,76 @@ class Bitrix24AppService
             ]);
         }
     }
+    /**
+     * Подтверждение доставки сообщения
+     */
+    protected function confirmMessageDelivery(CrmIntegration $integration, Bot $bot, array $messageData): void
+    {
+        try {
+            $connectorId = $this->getConnectorId($bot);
+            
+            $botIntegration = $integration->bots()->where('bot_id', $bot->id)->first();
+            $lineId = $botIntegration->pivot->connector_settings['line_id'] ?? null;
+            
+            if (!$lineId) {
+                return;
+            }
+            
+            $this->makeRequest($integration, 'imconnector.send.status.delivery', [
+                'CONNECTOR' => $connectorId,
+                'LINE' => $lineId,
+                'MESSAGES' => [
+                    [
+                        'im' => $messageData['im'] ?? null,
+                        'message' => [
+                            'id' => [$messageData['message']['id'] ?? null]
+                        ],
+                        'chat' => [
+                            'id' => $messageData['chat']['id'] ?? null
+                        ],
+                    ],
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to confirm message delivery', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+    /**
+     * Подтверждение доставки сообщения
+     */
+    // protected function confirmMessageDelivery(CrmIntegration $integration, array $messageData): void
+    // {
+    //     try {
+    //         $connectorId = 'chatbot_1_1'; // или получите из данных
+    //         $lineId = 26; // или получите из данных
+            
+    //         $result = $this->makeRequest($integration, 'imconnector.send.status.delivery', [
+    //             'CONNECTOR' => $connectorId,
+    //             'LINE' => $lineId,
+    //             'MESSAGES' => [
+    //                 [
+    //                     'im' => [
+    //                         'chat_id' => $messageData['im']['chat_id'] ?? null,
+    //                         'message_id' => $messageData['im']['message_id'] ?? null,
+    //                     ]
+    //                 ]
+    //             ]
+    //         ]);
+            
+    //         Log::info('Message delivery confirmed', [
+    //             'result' => $result,
+    //             'message_id' => $messageData['im']['message_id'] ?? null
+    //         ]);
+            
+    //     } catch (\Exception $e) {
+    //         Log::warning('Failed to confirm message delivery', [
+    //             'error' => $e->getMessage()
+    //         ]);
+    //     }
+    // }
     
     /**
      * Отправка сообщения пользователя в Битрикс24
@@ -676,40 +733,7 @@ class Bitrix24AppService
         }
     }
     
-
-    /**
-     * Подтверждение доставки сообщения
-     */
-    protected function confirmMessageDelivery(CrmIntegration $integration, array $messageData): void
-    {
-        try {
-            $connectorId = 'chatbot_1_1'; // или получите из данных
-            $lineId = 26; // или получите из данных
-            
-            $result = $this->makeRequest($integration, 'imconnector.send.status.delivery', [
-                'CONNECTOR' => $connectorId,
-                'LINE' => $lineId,
-                'MESSAGES' => [
-                    [
-                        'im' => [
-                            'chat_id' => $messageData['im']['chat_id'] ?? null,
-                            'message_id' => $messageData['im']['message_id'] ?? null,
-                        ]
-                    ]
-                ]
-            ]);
-            
-            Log::info('Message delivery confirmed', [
-                'result' => $result,
-                'message_id' => $messageData['im']['message_id'] ?? null
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::warning('Failed to confirm message delivery', [
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
+    
     
     /**
      * Обновление токенов авторизации
@@ -850,45 +874,6 @@ class Bitrix24AppService
                 <path fill="#6366F1" d="M35 10c-13.8 0-25 9.2-25 20.5 0 6.5 3.7 12.3 9.5 16.1l-2.4 7.4c-.2.7.5 1.3 1.2.9l8.2-4.1c2.4.5 5 .7 7.5.7 13.8 0 25-9.2 25-20.5S48.8 10 35 10zm-10 25c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm10 0c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm10 0c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3z"/>
             </svg>
         ');
-    }
-
-    public function debugConnectorInfo(CrmIntegration $integration, Bot $bot): array
-    {
-        try {
-            $connectorId = $this->getConnectorId($bot);
-            $debug = [
-                'connector_id' => $connectorId,
-                'bot_metadata' => $bot->metadata,
-            ];
-            
-            // Получаем список открытых линий
-            try {
-                $linesResult = $this->makeRequest($integration, 'imopenlines.config.list.get');
-                $debug['open_lines'] = $linesResult['result'] ?? [];
-            } catch (\Exception $e) {
-                $debug['open_lines_error'] = $e->getMessage();
-            }
-            
-            // Проверяем статус коннектора для каждой линии
-            if (!empty($debug['open_lines'])) {
-                foreach ($debug['open_lines'] as $line) {
-                    try {
-                        $lineStatus = $this->makeRequest($integration, 'imconnector.status', [
-                            'CONNECTOR' => $connectorId,
-                            'LINE' => $line['ID']
-                        ]);
-                        $debug['line_status'][$line['ID']] = $lineStatus['result'] ?? $lineStatus['error'] ?? 'Unknown';
-                    } catch (\Exception $e) {
-                        $debug['line_status'][$line['ID']] = 'Error: ' . $e->getMessage();
-                    }
-                }
-            }
-            
-            return $debug;
-            
-        } catch (\Exception $e) {
-            return ['error' => $e->getMessage()];
-        }
     }
 
     public function handleOpenlineWebhook(array $data): void

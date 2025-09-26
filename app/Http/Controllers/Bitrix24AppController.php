@@ -6,7 +6,6 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Models\Bot;
 use App\Models\CrmIntegration;
-use App\Models\Conversation;
 use App\Services\Bitrix24\Bitrix24AppService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -627,7 +626,7 @@ class Bitrix24AppController extends Controller
             'all_data' => $request->all(),
             'headers' => $request->headers->all()
         ]);
-        
+
         try {
             $event = $request->input('event');
             $data = $request->input('data');
@@ -687,115 +686,80 @@ class Bitrix24AppController extends Controller
         }
     }
 
-    /**
-     * Обработка сообщений из открытой линии
-     */
-    protected function handleOpenLineMessage(CrmIntegration $integration, array $data): void
+    public function handleConnectorMessage(CrmIntegration $integration, array $data): void
     {
         try {
-            Log::info('=== Processing open line message ===', [
-                'has_message' => isset($data['MESSAGE']),
-                'has_chat' => isset($data['CHAT']),
-                'author_id' => $data['AUTHOR_ID'] ?? null
-            ]);
+            $messages = $data['MESSAGES'] ?? [];
             
-            // Получаем данные сообщения
-            $message = $data['MESSAGE'] ?? [];
-            $chat = $data['CHAT'] ?? [];
-            $authorId = $data['AUTHOR_ID'] ?? null;
-            
-            if (empty($message) || empty($chat)) {
-                Log::warning('Empty message or chat data');
-                return;
-            }
-            
-            // Извлекаем ID чата
-            $chatId = $chat['ID'] ?? null;
-            
-            if (!$chatId) {
-                Log::warning('No chat ID found');
-                return;
-            }
-            
-            // Ищем диалог по chat_id
-            $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)
-                ->orWhere('metadata->bitrix24_chat_id', (string)$chatId)
-                ->first();
+            foreach ($messages as $messageData) {
+                $chatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
+                $conversation = Conversation::find($chatId);
                 
-            if (!$conversation) {
-                Log::warning('Conversation not found for chat', [
-                    'chat_id' => $chatId
-                ]);
-                return;
-            }
-            
-            // Проверяем, не наше ли это сообщение
-            if ($message['AUTHOR_ID'] == $conversation->bot->metadata['bitrix24_bot_id']) {
-                Log::info('Skipping our bot message');
-                return;
-            }
-            
-            // Проверяем на дубликаты
-            $messageId = $message['ID'] ?? null;
-            if ($messageId) {
-                $exists = $conversation->messages()
-                    ->where('metadata->bitrix24_message_id', $messageId)
-                    ->exists();
-                    
-                if ($exists) {
-                    Log::info('Message already exists', ['message_id' => $messageId]);
-                    return;
+                if (!$conversation) {
+                    continue;
                 }
+                
+                $authorType = $messageData['user']['type'] ?? 'USER';
+                $authorId = $messageData['user']['id'] ?? null;
+                
+                // Пропускаем сообщения от нашего бота
+                if ($authorType === 'BOT') {
+                    $bot = $conversation->bot;
+                    $botId = $bot->metadata['bitrix24_bot_id'] ?? null;
+                    if ($botId && $authorId == $botId) {
+                        continue;
+                    }
+                }
+                
+                // Проверяем дубликаты
+                $bitrix24MessageId = $messageData['message']['id'] ?? null;
+                if ($bitrix24MessageId) {
+                    $existingMessage = $conversation->messages()
+                        ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
+                        ->first();
+                    
+                    if ($existingMessage) {
+                        continue;
+                    }
+                }
+                
+                // Определяем роль
+                $role = match($authorType) {
+                    'OPERATOR' => 'operator',
+                    'USER', 'GUEST' => 'user',
+                    default => 'system'
+                };
+                
+                // Создаем сообщение
+                $newMessage = $conversation->messages()->create([
+                    'role' => $role,
+                    'content' => $messageData['message']['text'] ?? '',
+                    'metadata' => [
+                        'from_bitrix24' => true,
+                        'bitrix24_message_id' => $bitrix24MessageId,
+                        'bitrix24_user_id' => $authorId,
+                        'author_type' => $authorType,
+                        'author_name' => $messageData['user']['name'] ?? null,
+                    ]
+                ]);
+                
+                // ВАЖНО: Отправляем событие для виджета через WebSocket или другой механизм
+                // Например, через Laravel Broadcasting:
+                broadcast(new \App\Events\BotMessageSent($conversation, $newMessage))->toOthers();
+                
+                // Обновляем статус и счетчики
+                if ($role === 'operator' && $conversation->status === 'active') {
+                    $conversation->update(['status' => 'waiting_operator']);
+                }
+                
+                $conversation->increment('messages_count');
+                $conversation->update(['last_message_at' => now()]);
             }
-            
-            // Создаем сообщение от оператора
-            $newMessage = $conversation->messages()->create([
-                'role' => 'operator',
-                'content' => $message['TEXT'] ?? '',
-                'metadata' => [
-                    'from_bitrix24' => true,
-                    'bitrix24_message_id' => $messageId,
-                    'bitrix24_author_id' => $authorId,
-                    'operator_name' => $message['AUTHOR_NAME'] ?? 'Оператор',
-                ]
-            ]);
-            
-            // Обновляем статус диалога
-            if ($conversation->status === 'active') {
-                $conversation->update(['status' => 'waiting_operator']);
-            }
-            
-            $conversation->increment('messages_count');
-            $conversation->update(['last_message_at' => now()]);
-            
-            Log::info('=== Operator message processed ===', [
-                'conversation_id' => $conversation->id,
-                'message_id' => $newMessage->id,
-                'content_preview' => substr($newMessage->content, 0, 50)
-            ]);
             
         } catch (\Exception $e) {
-            Log::error('Failed to handle open line message', [
+            Log::error('Failed to handle connector message from Bitrix24', [
                 'error' => $e->getMessage(),
-                'data' => $data
-            ]);
-        }
-    }
-
-    /**
-     * Обработка сообщений коннектора (включая от операторов)
-     */
-    protected function handleConnectorMessage(CrmIntegration $integration, array $data): void
-    {
-        try {
-            Log::info('=== Processing connector message ===', $data);
-            
-            // Вызываем существующий метод из appService
-            $this->appService->handleConnectorMessage($integration, $data);
-            
-        } catch (\Exception $e) {
-            Log::error('Failed to handle connector message', [
-                'error' => $e->getMessage()
+                'data' => $data,
             ]);
         }
     }
@@ -926,7 +890,7 @@ class Bitrix24AppController extends Controller
     {
         try {
             $data = $request->all();
-        
+            
             // Проверяем, что это не ошибка геолокации
             if (isset($data['error']) && strpos($data['error'], 'not supported') !== false) {
                 Log::warning('Bot handler called with geo restriction error', [
@@ -963,28 +927,8 @@ class Bitrix24AppController extends Controller
                 return response('OK');
             }
 
-            // Найти или создать диалог
-            $conversation = $this->findOrCreateConversationFromBot($bot, $user, $message);
+            // Остальной код обработки...
             
-            // Создать сообщение пользователя
-            $userMessage = $conversation->messages()->create([
-                'role' => 'user',
-                'content' => $message['TEXT'] ?? '',
-                'metadata' => [
-                    'from_bitrix24' => true,
-                    'bitrix24_message_id' => $message['ID'] ?? null,
-                    'bitrix24_user_id' => $user['ID'] ?? null,
-                ]
-            ]);
-
-            // Генерируем ответ бота
-            $aiService = app(\App\Services\AIService::class);
-            $response = $aiService->generateResponse($bot, $conversation, $message['TEXT'] ?? '');
-
-            // Отправляем ответ через API бота
-            $integration = $bot->crmIntegrations()->where('type', 'bitrix24')->first();
-            $this->sendBotMessage($integration, $botId, $message['CHAT_ID'], $response);
-
             return response('OK');
 
         } catch (\Exception $e) {
@@ -996,6 +940,68 @@ class Bitrix24AppController extends Controller
         }
     }
 
+    /**
+     * Найти или создать диалог от имени бота
+     */
+    protected function findOrCreateConversationFromBot(Bot $bot, array $user, array $message): Conversation
+    {
+        // Ищем канал веб для этого бота
+        $channel = $bot->channels()
+            ->where('type', 'web')
+            ->where('is_active', true)
+            ->first();
+        
+        if (!$channel) {
+            // Создаем канал если его нет
+            $channel = $bot->channels()->create([
+                'type' => 'web',
+                'name' => 'Web Widget',
+                'is_active' => true,
+                'settings' => [],
+            ]);
+        }
+        
+        // Генерируем external_id на основе ID пользователя Битрикс24
+        $externalId = 'bitrix24_user_' . ($user['ID'] ?? 'unknown');
+        
+        // Ищем существующий активный диалог
+        $conversation = Conversation::where('bot_id', $bot->id)
+            ->where('channel_id', $channel->id)
+            ->where('external_id', $externalId)
+            ->where('status', 'active')
+            ->first();
+        
+        if (!$conversation) {
+            // Создаем новый диалог
+            $conversation = Conversation::create([
+                'bot_id' => $bot->id,
+                'channel_id' => $channel->id,
+                'external_id' => $externalId,
+                'status' => 'active',
+                'user_name' => $user['NAME'] ?? 'Пользователь Битрикс24',
+                'user_email' => $user['EMAIL'] ?? null,
+                'user_phone' => $user['PHONE'] ?? null,
+                'user_data' => [
+                    'bitrix24_user_id' => $user['ID'] ?? null,
+                    'bitrix24_user_name' => $user['NAME'] ?? null,
+                    'source' => 'bitrix24_bot',
+                ],
+                'metadata' => [
+                    'bitrix24_chat_id' => $message['CHAT_ID'] ?? null,
+                    'bitrix24_dialog_id' => $message['DIALOG_ID'] ?? null,
+                    'from_bitrix24_bot' => true,
+                ]
+            ]);
+            
+            Log::info('Created conversation from Bitrix24 bot', [
+                'conversation_id' => $conversation->id,
+                'bitrix24_user_id' => $user['ID'] ?? null,
+                'chat_id' => $message['CHAT_ID'] ?? null,
+            ]);
+        }
+        
+        return $conversation;
+    }
     /**
      * Отправка сообщения от имени бота
      */
@@ -1145,66 +1151,100 @@ class Bitrix24AppController extends Controller
     }
 
     /**
-     * Найти или создать диалог от имени бота
+     * Обработка сообщений из открытой линии
      */
-    protected function findOrCreateConversationFromBot(Bot $bot, array $user, array $message): Conversation
+    protected function handleOpenLineMessage(CrmIntegration $integration, array $data): void
     {
-        // Ищем канал веб для этого бота
-        $channel = $bot->channels()
-            ->where('type', 'web')
-            ->where('is_active', true)
-            ->first();
-        
-        if (!$channel) {
-            // Создаем канал если его нет
-            $channel = $bot->channels()->create([
-                'type' => 'web',
-                'name' => 'Web Widget',
-                'is_active' => true,
-                'settings' => [],
+        try {
+            Log::info('=== Processing open line message ===', [
+                'has_message' => isset($data['MESSAGE']),
+                'has_chat' => isset($data['CHAT']),
+                'author_id' => $data['AUTHOR_ID'] ?? null
             ]);
-        }
-        
-        // Генерируем external_id на основе ID пользователя Битрикс24
-        $externalId = 'bitrix24_user_' . ($user['ID'] ?? 'unknown');
-        
-        // Ищем существующий активный диалог
-        $conversation = Conversation::where('bot_id', $bot->id)
-            ->where('channel_id', $channel->id)
-            ->where('external_id', $externalId)
-            ->where('status', 'active')
-            ->first();
-        
-        if (!$conversation) {
-            // Создаем новый диалог
-            $conversation = Conversation::create([
-                'bot_id' => $bot->id,
-                'channel_id' => $channel->id,
-                'external_id' => $externalId,
-                'status' => 'active',
-                'user_name' => $user['NAME'] ?? 'Пользователь Битрикс24',
-                'user_email' => $user['EMAIL'] ?? null,
-                'user_phone' => $user['PHONE'] ?? null,
-                'user_data' => [
-                    'bitrix24_user_id' => $user['ID'] ?? null,
-                    'bitrix24_user_name' => $user['NAME'] ?? null,
-                    'source' => 'bitrix24_bot',
-                ],
+            
+            // Получаем данные сообщения
+            $message = $data['MESSAGE'] ?? [];
+            $chat = $data['CHAT'] ?? [];
+            $authorId = $data['AUTHOR_ID'] ?? null;
+            
+            if (empty($message) || empty($chat)) {
+                Log::warning('Empty message or chat data');
+                return;
+            }
+            
+            // Извлекаем ID чата
+            $chatId = $chat['ID'] ?? null;
+            
+            if (!$chatId) {
+                Log::warning('No chat ID found');
+                return;
+            }
+            
+            // Ищем диалог по chat_id
+            $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)
+                ->orWhere('metadata->bitrix24_chat_id', (string)$chatId)
+                ->first();
+                
+            if (!$conversation) {
+                Log::warning('Conversation not found for chat', [
+                    'chat_id' => $chatId
+                ]);
+                return;
+            }
+            
+            // Проверяем, не наше ли это сообщение
+            if ($message['AUTHOR_ID'] == $conversation->bot->metadata['bitrix24_bot_id']) {
+                Log::info('Skipping our bot message');
+                return;
+            }
+            
+            // Проверяем на дубликаты
+            $messageId = $message['ID'] ?? null;
+            if ($messageId) {
+                $exists = $conversation->messages()
+                    ->where('metadata->bitrix24_message_id', $messageId)
+                    ->exists();
+                    
+                if ($exists) {
+                    Log::info('Message already exists', ['message_id' => $messageId]);
+                    return;
+                }
+            }
+            
+            // Создаем сообщение от оператора
+            $newMessage = $conversation->messages()->create([
+                'role' => 'operator',
+                'content' => $message['TEXT'] ?? '',
                 'metadata' => [
-                    'bitrix24_chat_id' => $message['CHAT_ID'] ?? null,
-                    'bitrix24_dialog_id' => $message['DIALOG_ID'] ?? null,
-                    'from_bitrix24_bot' => true,
+                    'from_bitrix24' => true,
+                    'bitrix24_message_id' => $messageId,
+                    'bitrix24_author_id' => $authorId,
+                    'operator_name' => $message['AUTHOR_NAME'] ?? 'Оператор',
                 ]
             ]);
             
-            Log::info('Created conversation from Bitrix24 bot', [
+            // Обновляем статус диалога
+            if ($conversation->status === 'active') {
+                $conversation->update(['status' => 'waiting_operator']);
+            }
+            
+            $conversation->increment('messages_count');
+            $conversation->update(['last_message_at' => now()]);
+            
+            Log::info('=== Operator message processed ===', [
                 'conversation_id' => $conversation->id,
-                'bitrix24_user_id' => $user['ID'] ?? null,
-                'chat_id' => $message['CHAT_ID'] ?? null,
+                'message_id' => $newMessage->id,
+                'content_preview' => substr($newMessage->content, 0, 50)
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to handle open line message', [
+                'error' => $e->getMessage(),
+                'data' => $data
             ]);
         }
-        
-        return $conversation;
     }
+
+
     
 }
