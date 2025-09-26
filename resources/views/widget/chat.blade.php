@@ -366,18 +366,6 @@
     let botSettings = {};
     let userInfo = null;
     
-    window.addEventListener('message', function(event) {
-        // Проверяем, что сообщение пришло из нашего же источника для безопасности
-        if (event.origin !== window.location.origin) {
-            return;
-        }
-
-        // Если родительское окно говорит, что виджет открылся, запускаем инициализацию
-        if (event.data.type === 'chatbot-opened') {
-            console.log('Widget opened, re-initializing chat...');
-            initChat();
-        }
-    });
     // --- Инициализация чата при загрузке ---
     async function initChat() {
         try {
@@ -423,7 +411,7 @@
             chatMessages.innerHTML = '<p style="text-align: center; padding: 20px; color: #6b7280;">Произошла ошибка при загрузке чата. Пожалуйста, обновите страницу.</p>';
         }
     }
-
+    
     // --- Управление UI ---
 
     function displayChatInterface(messages = []) {
