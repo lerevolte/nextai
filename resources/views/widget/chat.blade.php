@@ -365,7 +365,19 @@
     let conversationId = null;
     let botSettings = {};
     let userInfo = null;
+    
+    window.addEventListener('message', function(event) {
+        // Проверяем, что сообщение пришло из нашего же источника для безопасности
+        if (event.origin !== window.location.origin) {
+            return;
+        }
 
+        // Если родительское окно говорит, что виджет открылся, запускаем инициализацию
+        if (event.data.type === 'chatbot-opened') {
+            console.log('Widget opened, re-initializing chat...');
+            initChat();
+        }
+    });
     // --- Инициализация чата при загрузке ---
     async function initChat() {
         try {

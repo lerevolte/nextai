@@ -632,64 +632,65 @@ class Bitrix24ConnectorProvider
             
             foreach ($messages as $messageData) {
                 $chatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
-                $conversation = Conversation::find($chatId);
+                $conversation = \App\Models\Conversation::find($chatId);
                 
                 if (!$conversation) {
-                    Log::warning('Conversation not found for Bitrix24 message', [
-                        'chat_id' => $chatId,
-                    ]);
+                    Log::warning('Conversation not found for Bitrix24 message', ['chat_id' => $chatId]);
                     continue;
                 }
 
-                // Проверяем, не создавали ли мы уже это сообщение
-                $bitrix24MessageId = $messageData['message']['id'] ?? null;
-                if ($bitrix24MessageId) {
-                    $existingMessage = $conversation->messages()
-                        ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
-                        ->first();
-                    
-                    if ($existingMessage) {
-                        Log::info('Message already exists, skipping', [
-                            'bitrix24_message_id' => $bitrix24MessageId
-                        ]);
-                        continue;
-                    }
-                }
+                // --- НОВЫЙ КОД: Проверка на "эхо" ---
+                $authorId = $messageData['user']['id'] ?? null;
+                $botBitrixId = $conversation->bot->metadata['bitrix24_bot_id'] ?? null;
 
-                // Сохраняем сообщение от оператора
-                $message = $conversation->messages()->create([
+                // Если ID автора сообщения совпадает с ID нашего бота в Битрикс24, игнорируем его
+                if ($authorId && $botBitrixId && $authorId == $botBitrixId) {
+                    Log::info('Skipping echo message from our own bot.', ['b24_bot_id' => $botBitrixId]);
+                    // Важно: все равно отправляем подтверждение, чтобы в Битриксе не было статуса "Не доставлено"
+                    $this->confirmMessageDelivery($conversation->bot, $messageData);
+                    continue;
+                }
+                // --- КОНЕЦ НОВОГО КОДА ---
+
+                $bitrix24MessageId = $messageData['message']['id'] ?? null;
+                if ($bitrix24MessageId && $conversation->messages()->where('metadata->bitrix24_message_id', $bitrix24MessageId)->exists()) {
+                    $this->confirmMessageDelivery($conversation->bot, $messageData);
+                    continue;
+                }
+                
+                $rawText = $messageData['message']['text'] ?? '';
+                $operatorName = $messageData['user']['name'] ?? 'Оператор';
+                $messageText = $rawText;
+
+                if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
+                    $operatorName = $matches[1];
+                    $messageText = trim($matches[2]);
+                } else {
+                    $messageText = preg_replace(['/\[br\]/i', '/\[\/?b\]/i'], ["\n", ''], $messageText);
+                }
+                
+                $conversation->messages()->create([
                     'role' => 'operator',
-                    'content' => $messageData['message']['text'] ?? '',
+                    'content' => $messageText,
                     'metadata' => [
                         'from_bitrix24' => true,
                         'bitrix24_message_id' => $bitrix24MessageId,
-                        'bitrix24_user_id' => $messageData['user']['id'] ?? null,
-                        'operator_name' => $messageData['user']['name'] ?? 'Оператор',
+                        'bitrix24_user_id' => $authorId,
+                        'operator_name' => $operatorName,
                     ]
                 ]);
 
-                // Подтверждаем доставку
-                $this->confirmMessageDelivery(
-                    $conversation->bot,
-                    $messageData
-                );
+                $this->confirmMessageDelivery($conversation->bot, $messageData);
 
-                // Обновляем статус диалога
                 if ($conversation->status === 'active') {
                     $conversation->update(['status' => 'waiting_operator']);
                 }
 
-                Log::info('Operator message processed', [
-                    'conversation_id' => $conversation->id,
-                    'message_id' => $message->id,
-                ]);
+                Log::info('Operator message processed successfully', ['conversation_id' => $conversation->id]);
             }
 
         } catch (\Exception $e) {
-            Log::error('Failed to handle operator message from Bitrix24', [
-                'error' => $e->getMessage(),
-                'data' => $data,
-            ]);
+            Log::error('Failed to handle operator message from Bitrix24 provider', ['error' => $e->getMessage()]);
         }
     }
 

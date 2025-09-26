@@ -19,7 +19,7 @@ class Bitrix24ConnectorController extends Controller
      */
     public function settings(Request $request)
     {
-
+        
         try {
             // Получаем параметры из Битрикс24
             $placement = $request->input('PLACEMENT');
@@ -81,7 +81,6 @@ class Bitrix24ConnectorController extends Controller
      */
     public function handler(Request $request)
     {
-        info($request->all());
         try {
             $event = $request->input('event');
             $data = $request->input('data', []);

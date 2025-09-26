@@ -37,6 +37,9 @@ class Bitrix24AppService
                 'ONIMCONNECTORMESSAGEUPDATE' => url('/bitrix24/event-handler'), // Обновления сообщений
                 'ONIMBOTMESSAGEADD' => url('/bitrix24/event-handler'), // Сообщения к боту
                 'ONAPPUNINSTALL' => url('/bitrix24/event-handler'),
+                'ONIMOPENLINESMESSAGEUPDATE' => url('/bitrix24/event-handler'),
+                'ONIMOPENLINEMESSAGEADD' => url('/bitrix24/event-handler'), // без S
+                'ONIMMESSAGEADD' => url('/bitrix24/event-handler'),
             ];
             
             foreach ($events as $event => $handler) {
@@ -263,14 +266,18 @@ class Bitrix24AppService
                     'DATA' => [
                         'id' => $connectorId,
                         'url_im' => route('widget.show', $bot->slug),
-                        'url_webhook' => url('/webhooks/crm/bitrix24/connector/handler'),
+                        'url_handler' => url('/bitrix24/event-handler'),
                         'name' => $bot->name,
                         'desc' => $bot->description ?? 'AI Chat Bot',
                     ]
                 ];
                 
                 $dataResult = $this->makeRequest($integration, 'imconnector.connector.data.set', $widgetData);
-                
+                $this->makeRequest($integration, 'event.bind', [
+                    'event' => 'ONIMCONNECTORMESSAGEADD',
+                    'handler' => url('/bitrix24/event-handler'),
+                    'connector' => $connectorId, // Указываем конкретный коннектор
+                ]);
                 Log::info('Connector data set', [
                     'result' => $dataResult,
                     'widget_data' => $widgetData
@@ -588,6 +595,7 @@ class Bitrix24AppService
                 
                 // Отправляем подтверждение доставки обратно в Битрикс24
                 $this->confirmMessageDelivery($integration, $messageData);
+                
             }
 
         } catch (\Exception $e) {

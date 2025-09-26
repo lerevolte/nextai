@@ -6,6 +6,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Models\Bot;
 use App\Models\CrmIntegration;
+use App\Models\Conversation;
 use App\Services\Bitrix24\Bitrix24AppService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -620,11 +621,13 @@ class Bitrix24AppController extends Controller
      */
     public function eventHandler(Request $request)
     {
-        Log::info('=== RAW Bitrix24 event ===', [
+        Log::channel('bitrix24')->info('=== RAW Bitrix24 event ===', [
             'url' => $request->fullUrl(),
             'method' => $request->method(),
             'all_data' => $request->all(),
-            'headers' => $request->headers->all()
+            'headers' => $request->headers->all(),
+            'ip' => $request->ip(),
+            'timestamp' => now()->toIso8601String()
         ]);
 
         try {
@@ -689,75 +692,14 @@ class Bitrix24AppController extends Controller
     public function handleConnectorMessage(CrmIntegration $integration, array $data): void
     {
         try {
-            $messages = $data['MESSAGES'] ?? [];
+            // Создаем экземпляр провайдера, который умеет работать с коннектором
+            $provider = new \App\Services\CRM\Providers\Bitrix24ConnectorProvider($integration);
             
-            foreach ($messages as $messageData) {
-                $chatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
-                $conversation = Conversation::find($chatId);
-                
-                if (!$conversation) {
-                    continue;
-                }
-                
-                $authorType = $messageData['user']['type'] ?? 'USER';
-                $authorId = $messageData['user']['id'] ?? null;
-                
-                // Пропускаем сообщения от нашего бота
-                if ($authorType === 'BOT') {
-                    $bot = $conversation->bot;
-                    $botId = $bot->metadata['bitrix24_bot_id'] ?? null;
-                    if ($botId && $authorId == $botId) {
-                        continue;
-                    }
-                }
-                
-                // Проверяем дубликаты
-                $bitrix24MessageId = $messageData['message']['id'] ?? null;
-                if ($bitrix24MessageId) {
-                    $existingMessage = $conversation->messages()
-                        ->where('metadata->bitrix24_message_id', $bitrix24MessageId)
-                        ->first();
-                    
-                    if ($existingMessage) {
-                        continue;
-                    }
-                }
-                
-                // Определяем роль
-                $role = match($authorType) {
-                    'OPERATOR' => 'operator',
-                    'USER', 'GUEST' => 'user',
-                    default => 'system'
-                };
-                
-                // Создаем сообщение
-                $newMessage = $conversation->messages()->create([
-                    'role' => $role,
-                    'content' => $messageData['message']['text'] ?? '',
-                    'metadata' => [
-                        'from_bitrix24' => true,
-                        'bitrix24_message_id' => $bitrix24MessageId,
-                        'bitrix24_user_id' => $authorId,
-                        'author_type' => $authorType,
-                        'author_name' => $messageData['user']['name'] ?? null,
-                    ]
-                ]);
-                
-                // ВАЖНО: Отправляем событие для виджета через WebSocket или другой механизм
-                // Например, через Laravel Broadcasting:
-                broadcast(new \App\Events\BotMessageSent($conversation, $newMessage))->toOthers();
-                
-                // Обновляем статус и счетчики
-                if ($role === 'operator' && $conversation->status === 'active') {
-                    $conversation->update(['status' => 'waiting_operator']);
-                }
-                
-                $conversation->increment('messages_count');
-                $conversation->update(['last_message_at' => now()]);
-            }
-            
+            // Вызываем его метод для обработки сообщения от оператора
+            $provider->handleOperatorMessage($data);
+
         } catch (\Exception $e) {
-            Log::error('Failed to handle connector message from Bitrix24', [
+            Log::error('Failed to handle connector message in Controller', [
                 'error' => $e->getMessage(),
                 'data' => $data,
             ]);
@@ -888,6 +830,7 @@ class Bitrix24AppController extends Controller
      */
     public function botHandler(Request $request)
     {
+
         try {
             $data = $request->all();
             

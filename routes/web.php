@@ -249,7 +249,20 @@ Route::prefix('webhooks/crm/bitrix24/connector')->group(function () {
         ->name('webhooks.bitrix24.connector.handler')
         ->withoutMiddleware(['web', 'csrf']);
 });
-
+Route::get('/test/check-events/{integrationId}', function($integrationId) {
+    $integration = \App\Models\CrmIntegration::find($integrationId);
+    if (!$integration) {
+        return 'Integration not found';
+    }
+    
+    $appService = app(\App\Services\Bitrix24\Bitrix24AppService::class);
+    $events = $appService->checkRegisteredEvents($integration);
+    
+    return response()->json([
+        'registered_events' => $events,
+        'expected_handler' => url('/bitrix24/event-handler')
+    ]);
+})->middleware('auth');
 // API для управления коннектором (защищенные)
 Route::middleware(['auth'])->prefix('api/crm/bitrix24/connector')->group(function () {
     // Регистрация коннектора для бота
@@ -306,6 +319,13 @@ Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function ()
     Route::post('/bot-delete', [App\Http\Controllers\Bitrix24AppController::class, 'botDelete'])
         ->name('bitrix24.bot-delete');
 });
+Route::any('/bitrix24/{any}', function(Request $request, $any) {
+   Log::channel('bitrix24')->info('Catch-all route hit', [
+       'path' => $any,
+       'data' => $request->all()
+   ]);
+   return response('OK');
+})->where('any', '.*')->withoutMiddleware(['web', 'csrf']);
  Route::get('/test', (function(){
     $integration = \App\Models\CrmIntegration::find(9);
     $botIntegration = $integration->bots()

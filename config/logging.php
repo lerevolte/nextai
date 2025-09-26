@@ -51,6 +51,11 @@ return [
     */
 
     'channels' => [
+        'bitrix24' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/bitrix24.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
 
         'stack' => [
             'driver' => 'stack',
