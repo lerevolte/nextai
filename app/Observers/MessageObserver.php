@@ -44,7 +44,7 @@ class MessageObserver
         }
 
         if ($message->role === 'user') {
-            $this->functionService->processMessage($message);
+            //$this->functionService->processMessage($message);
         }
     }
 }

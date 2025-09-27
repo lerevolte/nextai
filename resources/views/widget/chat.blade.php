@@ -665,86 +665,100 @@
         // Регулярное выражение для проверки, является ли URL изображением
         const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i;
         
-        // Сначала обрабатываем markdown ссылки формата [текст](url)
+        // Сохраняем все HTML блоки во временный массив
+        const htmlBlocks = [];
+        let blockIndex = 0;
+        
+        // Функция для сохранения HTML блока и возврата placeholder
+        function saveHtmlBlock(html) {
+            const placeholder = `###HTML_BLOCK_${blockIndex}###`;
+            htmlBlocks[blockIndex] = html;
+            blockIndex++;
+            return placeholder;
+        }
+        
+        // Обрабатываем markdown ссылки формата [текст](url)
         escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, linkText, url) {
-            // Очищаем URL от возможных HTML entities
             const cleanUrl = url.replace(/&amp;/g, '&');
             
             if (imageExtensions.test(cleanUrl)) {
-                // Если это изображение, создаем элемент img
-                return `
-                    <div class="message-image-container" style="margin: 8px 0;">
-                        <img src="${cleanUrl}" 
-                             alt="${linkText}" 
-                             title="${linkText}"
-                             class="message-image"
-                             onclick="openImageModal('${cleanUrl}')"
-                             onerror="this.onerror=null; this.parentElement.innerHTML='<a href=\\'${cleanUrl}\\' target=\\'_blank\\' style=\\'color: #667eea; text-decoration: underline;\\'>${linkText}</a>';"
-                             style="max-width: 100%; max-height: 300px; border-radius: 8px; cursor: pointer; display: block;">
-                        <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
-                            <span>${linkText}</span> • 
-                            <a href="${cleanUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">Открыть в новой вкладке</a>
-                        </div>
-                    </div>
-                `;
+                // Создаем HTML для изображения и сохраняем его
+                const html = createImageHtml(cleanUrl, linkText);
+                return saveHtmlBlock(html);
             } else {
-                // Если это обычная ссылка, используем текст из markdown
-                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: underline; word-break: break-all;">${linkText}</a>`;
+                // Создаем HTML для ссылки и сохраняем его
+                const html = createLinkHtml(cleanUrl, linkText);
+                return saveHtmlBlock(html);
             }
         });
         
-        // Затем обрабатываем обычные URL (которые не в markdown формате)
-        // Но только те, которые еще не были обработаны
-        const urlRegex = /(?<![\(\[])(https?:\/\/[^\s<>\[\]()]+)(?![\)\]])/gi;
-        
+        // Обрабатываем обычные URL
+        const urlRegex = /(https?:\/\/[^\s<>\[\]()]+)/gi;
         escaped = escaped.replace(urlRegex, function(url) {
-            // Проверяем, не находится ли URL уже внутри тега <a> или <img>
-            // Это нужно чтобы не обрабатывать уже обработанные URL
-            if (url.includes('href=') || url.includes('src=')) {
-                return url;
-            }
-            
-            // Очищаем URL от возможных HTML entities
             const cleanUrl = url.replace(/&amp;/g, '&');
             
             if (imageExtensions.test(cleanUrl)) {
-                // Если это изображение
-                return `
-                    <div class="message-image-container" style="margin: 8px 0;">
-                        <img src="${cleanUrl}" 
-                             alt="Изображение" 
-                             class="message-image"
-                             onclick="openImageModal('${cleanUrl}')"
-                             onerror="this.onerror=null; this.parentElement.innerHTML='<a href=\\'${cleanUrl}\\' target=\\'_blank\\' style=\\'color: #667eea; text-decoration: underline;\\'>Изображение недоступно (открыть ссылку)</a>';"
-                             style="max-width: 100%; max-height: 300px; border-radius: 8px; cursor: pointer; display: block;">
-                        <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
-                            <a href="${cleanUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">Открыть в новой вкладке</a>
-                        </div>
-                    </div>
-                `;
+                const html = createImageHtml(cleanUrl, 'Изображение');
+                return saveHtmlBlock(html);
             } else {
-                // Если это обычная ссылка
-                let displayText = cleanUrl;
-                try {
-                    const urlObj = new URL(cleanUrl);
-                    displayText = urlObj.hostname + (urlObj.pathname !== '/' ? urlObj.pathname : '');
-                    if (displayText.length > 50) {
-                        displayText = displayText.substring(0, 47) + '...';
-                    }
-                } catch (e) {
-                    if (displayText.length > 50) {
-                        displayText = displayText.substring(0, 47) + '...';
-                    }
-                }
-                
-                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: underline; word-break: break-all;">${displayText}</a>`;
+                const html = createLinkHtml(cleanUrl);
+                return saveHtmlBlock(html);
             }
         });
         
-        // Заменяем переносы строк на <br>
+        // Теперь безопасно заменяем переносы строк на <br>
         escaped = escaped.replace(/\n/g, '<br>');
         
+        // Восстанавливаем HTML блоки
+        for (let i = 0; i < blockIndex; i++) {
+            escaped = escaped.replace(`###HTML_BLOCK_${i}###`, htmlBlocks[i]);
+        }
+        
         return escaped;
+    }
+
+    // Вспомогательная функция для создания HTML изображения
+    function createImageHtml(url, altText) {
+        const safeUrl = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const safeAlt = altText.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        
+        return `<div class="message-image-container" style="margin: 8px 0;">` +
+               `<img src="${safeUrl}" ` +
+               `alt="${safeAlt}" ` +
+               `title="${safeAlt}" ` +
+               `class="message-image" ` +
+               `onclick="openImageModal('${safeUrl}')" ` +
+               `onerror="this.onerror=null; this.parentElement.innerHTML='<a href=&quot;${safeUrl}&quot; target=&quot;_blank&quot; style=&quot;color: #667eea; text-decoration: underline;&quot;>${safeAlt}</a>';" ` +
+               `style="max-width: 100%; max-height: 300px; border-radius: 8px; cursor: pointer; display: block;">` +
+               `<div style="font-size: 11px; color: #6b7280; margin-top: 4px;">` +
+               `<span>${safeAlt}</span> • ` +
+               `<a href="${safeUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">Открыть в новой вкладке</a>` +
+               `</div>` +
+               `</div>`;
+    }
+
+    // Вспомогательная функция для создания HTML ссылки
+    function createLinkHtml(url, text) {
+        const safeUrl = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        
+        // Если текст не передан, генерируем его из URL
+        if (!text) {
+            try {
+                const urlObj = new URL(url);
+                text = urlObj.hostname + (urlObj.pathname !== '/' ? urlObj.pathname : '');
+                if (text.length > 50) {
+                    text = text.substring(0, 47) + '...';
+                }
+            } catch (e) {
+                text = url;
+                if (text.length > 50) {
+                    text = text.substring(0, 47) + '...';
+                }
+            }
+        }
+        
+        const safeText = escapeHtml(text);
+        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: underline; word-break: break-all;">${safeText}</a>`;
     }
 
     // Функция для открытия модального окна с изображением
