@@ -16,6 +16,8 @@ use App\Http\Controllers\KnowledgeSourceController;
 use App\Http\Controllers\AbTestController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\PerformanceController;
+use App\Http\Controllers\BillingController;
+use App\Http\Controllers\BotFunctionController;
 use Illuminate\Support\Facades\Route;
 
 // Публичные роуты
@@ -319,13 +321,40 @@ Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function ()
     Route::post('/bot-delete', [App\Http\Controllers\Bitrix24AppController::class, 'botDelete'])
         ->name('bitrix24.bot-delete');
 });
-Route::any('/bitrix24/{any}', function(Request $request, $any) {
-   Log::channel('bitrix24')->info('Catch-all route hit', [
-       'path' => $any,
-       'data' => $request->all()
-   ]);
-   return response('OK');
-})->where('any', '.*')->withoutMiddleware(['web', 'csrf']);
+// Биллинг и тарифы
+Route::prefix('billing')->middleware(['auth'])->group(function () {
+    Route::get('/tariffs', [BillingController::class, 'tariffs'])->name('billing.tariffs');
+    Route::get('/balance', [BillingController::class, 'balance'])->name('billing.balance');
+    Route::get('/deposit', [BillingController::class, 'deposit'])->name('billing.deposit');
+    Route::post('/deposit', [BillingController::class, 'createPayment'])->name('billing.payment.create');
+    Route::post('/subscribe/{tariff}', [BillingController::class, 'subscribe'])->name('billing.subscribe');
+    Route::post('/cancel-subscription', [BillingController::class, 'cancelSubscription'])->name('billing.cancel');
+    Route::get('/payments', [BillingController::class, 'payments'])->name('billing.payments');
+    Route::get('/payment/success', [BillingController::class, 'paymentSuccess'])->name('billing.payment.success');
+});
+Route::prefix('bots/{bot}/functions')->middleware('bot.access')->group(function () {
+    Route::get('/', [BotFunctionController::class, 'index'])->name('functions.index');
+    Route::get('/create', [BotFunctionController::class, 'create'])->name('functions.create');
+    Route::post('/', [BotFunctionController::class, 'store'])->name('functions.store');
+    Route::get('/{function}', [BotFunctionController::class, 'show'])->name('functions.show');
+    Route::get('/{function}/edit', [BotFunctionController::class, 'edit'])->name('functions.edit');
+    Route::put('/{function}', [BotFunctionController::class, 'update'])->name('functions.update');
+    Route::delete('/{function}', [BotFunctionController::class, 'destroy'])->name('functions.destroy');
+    Route::post('/{function}/test', [BotFunctionController::class, 'test'])->name('functions.test');
+    Route::post('/{function}/toggle', [BotFunctionController::class, 'toggle'])->name('functions.toggle');
+    Route::get('/{function}/executions', [BotFunctionController::class, 'executions'])->name('functions.executions');
+});
+// Webhook ЮКассы (без авторизации)
+Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
+    ->name('yookassa.webhook')
+    ->withoutMiddleware(['web', 'csrf']);
+// Route::any('/bitrix24/{any}', function(Request $request, $any) {
+//    Log::channel('bitrix24')->info('Catch-all route hit', [
+//        'path' => $any,
+//        'data' => $request->all()
+//    ]);
+//    return response('OK');
+// })->where('any', '.*')->withoutMiddleware(['web', 'csrf']);
  Route::get('/test', (function(){
     $integration = \App\Models\CrmIntegration::find(9);
     $botIntegration = $integration->bots()

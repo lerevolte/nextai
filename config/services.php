@@ -40,5 +40,8 @@ return [
         'client_secret' => env('BITRIX24_CLIENT_SECRET'),
         'scope' => 'imconnector,imopenlines,crm,user',
     ],
-
+    'yookassa' => [
+        'shop_id' => env('YOOKASSA_SHOP_ID'),
+        'secret_key' => env('YOOKASSA_SECRET_KEY')
+    ] 
 ];

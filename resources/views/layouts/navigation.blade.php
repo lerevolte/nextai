@@ -45,6 +45,10 @@
                        style="padding: 8px 16px; text-decoration: none; color: {{ request()->routeIs('crm.*') ? '#6366f1' : '#4b5563' }}; font-weight: 500; border-radius: 6px; background: {{ request()->routeIs('crm.*') ? '#eef2ff' : 'transparent' }}; transition: all 0.2s;">
                         🔗 Интеграции
                     </a>
+                    <a href="{{ route('billing.tariffs') }}" 
+                       style="padding: 8px 16px; text-decoration: none; color: {{ request()->routeIs('billing.*') ? '#6366f1' : '#4b5563' }}; font-weight: 500; border-radius: 6px; background: {{ request()->routeIs('billing.*') ? '#eef2ff' : 'transparent' }}; transition: all 0.2s;">
+                        💳 Тарифы
+                    </a>
 
                     @if(auth()->user()->hasRole(['owner', 'admin']))
                     <div style="position: relative; display: inline-block;">

@@ -634,24 +634,31 @@ class Bitrix24ConnectorProvider
                 $chatId = str_replace('chat_', '', $messageData['chat']['id'] ?? '');
                 $conversation = \App\Models\Conversation::find($chatId);
                 
-                if (!$conversation) {
-                    Log::warning('Conversation not found for Bitrix24 message', ['chat_id' => $chatId]);
-                    continue;
-                }
+                if (!$conversation) continue;
 
-                // --- НОВЫЙ КОД: Проверка на "эхо" ---
-                $authorId = $messageData['user']['id'] ?? null;
-                $botBitrixId = $conversation->bot->metadata['bitrix24_bot_id'] ?? null;
+                $rawText = $messageData['message']['text'] ?? '';
 
-                // Если ID автора сообщения совпадает с ID нашего бота в Битрикс24, игнорируем его
-                if ($authorId && $botBitrixId && $authorId == $botBitrixId) {
-                    Log::info('Skipping echo message from our own bot.', ['b24_bot_id' => $botBitrixId]);
-                    // Важно: все равно отправляем подтверждение, чтобы в Битриксе не было статуса "Не доставлено"
+                // --- ФИНАЛЬНАЯ ПРОВЕРКА НА "ЭХО" ПО СОДЕРЖИМОМУ ---
+                $lastAssistantMessage = $conversation->messages()
+                    ->where('role', 'assistant')
+                    ->latest()->first();
+
+                if ($lastAssistantMessage && trim($lastAssistantMessage->content) === trim($rawText)) {
+                    Log::info("SUCCESS: Echo message from bot detected by content match and skipped.", [
+                        'conversation_id' => $conversation->id,
+                        'content' => $rawText,
+                    ]);
                     $this->confirmMessageDelivery($conversation->bot, $messageData);
                     continue;
                 }
-                // --- КОНЕЦ НОВОГО КОДА ---
+                // --- КОНЕЦ ПРОВЕРКИ ---
 
+                // Игнорируем приветствие от Открытой Линии
+                if ($conversation->messages()->count() <= 1 && str_starts_with(trim($rawText), 'Добро пожаловать')) {
+                    Log::info("Ignoring B24 Open Line welcome message.");
+                    $this->confirmMessageDelivery($conversation->bot, $messageData);
+                    continue;
+                }
                 $bitrix24MessageId = $messageData['message']['id'] ?? null;
                 if ($bitrix24MessageId && $conversation->messages()->where('metadata->bitrix24_message_id', $bitrix24MessageId)->exists()) {
                     $this->confirmMessageDelivery($conversation->bot, $messageData);
@@ -660,6 +667,7 @@ class Bitrix24ConnectorProvider
                 
                 $rawText = $messageData['message']['text'] ?? '';
                 $operatorName = $messageData['user']['name'] ?? 'Оператор';
+                $authorId = $messageData['user']['id'] ?? null;
                 $messageText = $rawText;
 
                 if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
@@ -669,6 +677,7 @@ class Bitrix24ConnectorProvider
                     $messageText = preg_replace(['/\[br\]/i', '/\[\/?b\]/i'], ["\n", ''], $messageText);
                 }
                 
+
                 $conversation->messages()->create([
                     'role' => 'operator',
                     'content' => $messageText,
@@ -687,8 +696,8 @@ class Bitrix24ConnectorProvider
                 }
 
                 Log::info('Operator message processed successfully', ['conversation_id' => $conversation->id]);
-            }
 
+            }
         } catch (\Exception $e) {
             Log::error('Failed to handle operator message from Bitrix24 provider', ['error' => $e->getMessage()]);
         }
@@ -851,8 +860,15 @@ class Bitrix24ConnectorProvider
             $ourChatId = 'chat_' . $conversation->id; // Наш ID чата (строка)
 
             if (!$lineId || !$chatId) {
+                Log::channel('bitrix24')->info('[ConfirmDelivery] Missing critical metadata for B24 confirmation', [
+                    'conversation_id' => $conversation->id,
+                    'line_id_found' => $lineId,
+                    'chat_id_found' => $chatId,
+                ]);
                 throw new \Exception('Line ID or Chat ID not found in conversation metadata');
             }
+
+
 
             $messagesPayload = [];
             foreach ($bitrix24MessageIds as $msgId) {
@@ -863,6 +879,12 @@ class Bitrix24ConnectorProvider
                 ];
             }
 
+            Log::channel('bitrix24')->info('[ConfirmDelivery] Sending confirmation payload to Bitrix24', [
+                'connector_id' => $connectorId,
+                'line_id' => $lineId,
+                'chat_id' => $chatId,
+                'messages_payload' => $messagesPayload,
+            ]);
             Log::info('Confirming message delivery to Bitrix24', [
                 'connector_id' => $connectorId,
                 'line_id' => $lineId,

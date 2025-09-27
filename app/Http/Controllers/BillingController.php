@@ -31,6 +31,8 @@ class BillingController extends Controller
     {
         $organization = auth()->user()->organization;
         $tariffs = Tariff::active()->ordered()->get();
+        
+        // Получаем активную подписку (может быть null)
         $currentSubscription = $organization->subscriptions()->active()->first();
         
         return view('billing.tariffs', compact('organization', 'tariffs', 'currentSubscription'));
@@ -42,16 +44,21 @@ class BillingController extends Controller
     public function balance()
     {
         $organization = auth()->user()->organization;
-        $balance = $organization->balance;
+        
+        // Получаем или создаем баланс
+        $balance = $organization->getOrCreateBalance();
+        
         $transactions = $organization->transactions()
             ->latest()
             ->paginate(20);
+        
         $payments = $organization->payments()
             ->latest()
             ->paginate(10);
         
         return view('billing.balance', compact('organization', 'balance', 'transactions', 'payments'));
     }
+
 
     /**
      * Форма пополнения баланса
@@ -236,14 +243,40 @@ class BillingController extends Controller
     /**
      * История платежей
      */
-    public function payments()
+    public function payments(Request $request)
     {
         $organization = auth()->user()->organization;
-        $payments = $organization->payments()
-            ->with('subscription')
-            ->latest()
-            ->paginate(20);
-
-        return view('billing.payments', compact('organization', 'payments'));
+        
+        $query = $organization->payments();
+        
+        // Применяем фильтры
+        if ($request->has('period') && $request->period !== 'all') {
+            switch ($request->period) {
+                case 'today':
+                    $query->whereDate('created_at', today());
+                    break;
+                case 'week':
+                    $query->where('created_at', '>=', now()->subWeek());
+                    break;
+                case 'month':
+                    $query->where('created_at', '>=', now()->subMonth());
+                    break;
+                case 'year':
+                    $query->where('created_at', '>=', now()->subYear());
+                    break;
+            }
+        }
+        
+        if ($request->has('status') && $request->status) {
+            $query->where('status', $request->status);
+        }
+        
+        if ($request->has('type') && $request->type) {
+            $query->where('type', $request->type);
+        }
+        
+        $payments = $query->latest()->paginate(20);
+        
+        return view('billing.payments', compact('payments', 'organization'));
     }
 }

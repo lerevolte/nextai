@@ -5,6 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
 use Illuminate\Support\Str;
 
 class Organization extends Model
@@ -38,7 +41,31 @@ class Organization extends Model
                 $organization->api_key = 'org_' . Str::random(32);
             }
         });
+
+        static::created(function ($organization) {
+            // Создаем баланс
+            OrganizationBalance::createForOrganization($organization);
+            
+            // Устанавливаем пробный период
+            if (!$organization->trial_ends_at) {
+                $organization->update([
+                    'is_trial' => true,
+                    'trial_ends_at' => now()->addDays(7),
+                ]);
+            }
+            
+            // Устанавливаем бесплатный тариф по умолчанию
+            if (!$organization->current_tariff_id) {
+                $freeTariff = Tariff::where('slug', 'starter')->first();
+                if ($freeTariff) {
+                    $organization->update(['current_tariff_id' => $freeTariff->id]);
+                }
+            }
+        });
     }
+
+
+
 
     public function users(): HasMany
     {
@@ -142,6 +169,56 @@ class Organization extends Model
             'active_ab_tests' => $this->abTests()->active()->count(),
             'scheduled_reports' => $this->scheduledReports()->active()->count()
         ];
+    }
+
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
+    public function balance(): HasOne
+    {
+        return $this->hasOne(OrganizationBalance::class);
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(Transaction::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function currentTariff(): BelongsTo
+    {
+        return $this->belongsTo(Tariff::class, 'current_tariff_id');
+    }
+
+    public function activeSubscription()
+    {
+        return $this->subscriptions()->active()->first();
+    }
+
+
+    public function hasActiveSubscription(): bool
+    {
+        return $this->subscriptions()->active()->exists();
+    }
+
+    public function isOnTrial(): bool
+    {
+        return $this->is_trial && $this->trial_ends_at && $this->trial_ends_at->isFuture();
+    }
+
+    public function getOrCreateBalance(): OrganizationBalance
+    {
+        if (!$this->balance) {
+            return OrganizationBalance::createForOrganization($this);
+        }
+        
+        return $this->balance;
     }
 
     

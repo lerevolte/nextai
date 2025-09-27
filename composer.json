@@ -26,7 +26,8 @@
         "smalot/pdfparser": "^2.12",
         "spatie/laravel-activitylog": "^4.10",
         "spatie/laravel-permission": "^6.21",
-        "twilio/sdk": "^8.8"
+        "twilio/sdk": "^8.8",
+        "yoomoney/yookassa-sdk-php": "^3.10"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

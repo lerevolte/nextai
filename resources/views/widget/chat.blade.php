@@ -290,6 +290,67 @@
         .hidden {
             display: none !important;
         }
+        /* Анимации для модального окна */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        /* Стили для изображений в сообщениях */
+        .message-image-container {
+            margin: 8px 0;
+            position: relative;
+        }
+
+        .message-image {
+            max-width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+            background: linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6),
+                        linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+
+        .message-image:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Индикатор загрузки для изображений */
+        .message-image:not([src]) {
+            min-height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .message-image:not([src])::after {
+            content: 'Загрузка...';
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        /* Стили для ссылок в сообщениях */
+        .message-content a {
+            transition: opacity 0.2s;
+            display: inline-block;
+        }
+
+        .message-content a:hover {
+            opacity: 0.8;
+        }
+
+        /* Стили для markdown ссылок */
+        .message-content a[target="_blank"]::after {
+            content: ' ↗';
+            font-size: 12px;
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body>
@@ -355,221 +416,238 @@
 </div>
 
 <script>
-    const config = {
+    // --- ГЛОБАЛЬНОЕ СОСТОЯНИЕ ВИДЖЕТА ---
+    const state = {
         botSlug: '{{ $bot->slug }}',
-        apiUrl: '/widget/{{ $bot->slug }}',
-        csrfToken: '{{ csrf_token() }}'
+        csrfToken: '{{ csrf_token() }}',
+        sessionId: localStorage.getItem('chat_session_{{ $bot->slug }}'),
+        conversationId: null,
+        botSettings: {},
+        userInfo: null,
+        lastMessageId: 0, // Начинаем с 0, чтобы получить все сообщения
+        isPolling: false, // Флаг, чтобы избежать одновременных запросов
+        pollingInterval: null
     };
 
-    let sessionId = localStorage.getItem('chat_session_' + config.botSlug);
-    let conversationId = null;
-    let botSettings = {};
-    let userInfo = null;
-    
-    // --- Инициализация чата при загрузке ---
+    // --- ФУНКЦИИ ЛОГИРОВАНИЯ ---
+    const log = (message, data = '') => console.log(`[ChatWidget] ${message}`, data);
+
+    // --- ОСНОВНАЯ ЛОГИКА ---
+
+    /**
+     * 1. Инициализация или перезагрузка чата
+     */
     async function initChat() {
+        log('Initializing chat...');
+        document.getElementById('chatMessages').innerHTML = '<div class="typing-indicator" id="typingIndicator"><span></span><span></span><span></span></div>'; // Очищаем чат
+        state.lastMessageId = 0; // Сбрасываем ID последнего сообщения
+
         try {
-            const response = await fetch(config.apiUrl + '/initialize', {
+            const response = await fetch(`/widget/${state.botSlug}/initialize`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
-                body: JSON.stringify({ session_id: sessionId })
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
+                body: JSON.stringify({ session_id: state.sessionId })
             });
 
-            if (!response.ok) throw new Error('Network response was not ok');
-
+            if (!response.ok) throw new Error('Initialization failed');
+            
             const data = await response.json();
-            
-            // Обновляем состояние из ответа сервера
-            sessionId = data.session_id;
-            conversationId = data.conversation_id;
-            botSettings = data.bot;
-            userInfo = data.user_info;
+            log('Initialized successfully', data);
 
-            localStorage.setItem('chat_session_' + config.botSlug, sessionId);
-            
-            // Настраиваем UI бота
-            document.getElementById('botName').textContent = botSettings.name || 'Чат-бот';
-            document.getElementById('botAvatar').textContent = (botSettings.name || 'Б').charAt(0).toUpperCase();
+            state.sessionId = data.session_id;
+            state.conversationId = data.conversation_id;
+            state.botSettings = data.bot;
+            state.userInfo = data.user_info;
+            localStorage.setItem(`chat_session_${state.botSlug}`, state.sessionId);
 
-            // Решаем, что показать: форму или чат
-            if (userInfo) {
-                // Если сервер вернул данные пользователя, значит сессия активна
-                localStorage.setItem('chat_user_info_' + config.botSlug, JSON.stringify(userInfo));
-                displayChatInterface(data.messages);
-            } else if (botSettings.collect_contacts) {
-                // Если данных нет и нужно их собирать - показываем форму
-                localStorage.removeItem('chat_user_info_' + config.botSlug);
-                displayContactForm();
-            } else {
-                // Если данные не нужны - начинаем как гость
-                skipContactForm();
+            // Настраиваем UI
+            document.getElementById('botName').textContent = state.botSettings.name || 'Чат-бот';
+            document.getElementById('botAvatar').textContent = (state.botSettings.name || 'Б').charAt(0).toUpperCase();
+            
+            // Загружаем историю и обновляем lastMessageId
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(msg => addMessageToChat(msg.role, msg.content, new Date(msg.created_at), msg.id)); // Добавляем msg.id
+                state.lastMessageId = data.messages[data.messages.length - 1].id;
+                log(`History loaded. Last message ID is now: ${state.lastMessageId}`);
             }
 
+            // Показываем чат и запускаем поллинг
+            document.getElementById('chatInputContainer').classList.remove('hidden');
+            startPolling();
+
         } catch (error) {
-            console.error('Failed to initialize chat:', error);
-            const chatMessages = document.getElementById('chatMessages');
-            chatMessages.innerHTML = '<p style="text-align: center; padding: 20px; color: #6b7280;">Произошла ошибка при загрузке чата. Пожалуйста, обновите страницу.</p>';
+            log('ERROR during initialization', error);
         }
     }
-    
-    // --- Управление UI ---
-
-    function displayChatInterface(messages = []) {
-        document.getElementById('contactForm').classList.add('hidden');
-        document.getElementById('chatInputContainer').classList.remove('hidden');
-        
-        const badge = document.getElementById('userInfoBadge');
-        if (userInfo && userInfo.name) {
-            document.getElementById('userDisplayName').textContent = userInfo.name;
-            badge.classList.add('show');
-        } else {
-            badge.classList.remove('show');
+    async function confirmDelivery(b24MessageIds) {
+        if (!b24MessageIds || b24MessageIds.length === 0) {
+            return;
         }
         
-        clearMessages();
-        loadMessageHistory(messages);
-    }
-    
-    function displayContactForm() {
-        clearMessages();
-        document.getElementById('contactForm').classList.remove('hidden');
-        document.getElementById('chatInputContainer').classList.add('hidden');
-        document.getElementById('userInfoBadge').classList.remove('show');
-    }
-
-    function clearMessages() {
-        const messagesContainer = document.getElementById('chatMessages');
-        messagesContainer.querySelectorAll('.message').forEach(el => el.remove());
-    }
-
-    // --- Обработка формы контактов ---
-
-    function validateContactForm() {
-        let isValid = true;
-        const userName = document.getElementById('userName');
-        const userEmail = document.getElementById('userEmail');
-        const userPhone = document.getElementById('userPhone');
-
-        document.querySelectorAll('.error-message').forEach(el => el.classList.remove('show'));
-        document.querySelectorAll('input').forEach(el => el.classList.remove('error'));
-
-        if (!userName.value.trim()) {
-            userName.classList.add('error');
-            document.getElementById('userNameError').classList.add('show');
-            isValid = false;
-        }
-        if (userEmail.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail.value)) {
-            userEmail.classList.add('error');
-            document.getElementById('userEmailError').classList.add('show');
-            isValid = false;
-        }
-        if (userPhone.value && !/\d{10,}/.test(userPhone.value.replace(/\D/g, ''))) {
-            userPhone.classList.add('error');
-            document.getElementById('userPhoneError').classList.add('show');
-            isValid = false;
-        }
-        return isValid;
-    }
-
-    async function submitContactForm() {
-        if (!validateContactForm()) return;
-        
-        const submittedUserInfo = {
-            name: document.getElementById('userName').value.trim(),
-            email: document.getElementById('userEmail').value.trim() || null,
-            phone: document.getElementById('userPhone').value.trim() || null
-        };
-        
-        // Отправляем данные на сервер для обновления диалога
-        await startSessionWithUserInfo(submittedUserInfo);
-    }
-
-    async function skipContactForm() {
-        await startSessionWithUserInfo({ name: 'Гость', email: null, phone: null });
-    }
-
-    async function startSessionWithUserInfo(newUserInfo) {
         try {
-            const response = await fetch(config.apiUrl + '/initialize', {
+            await fetch(`/widget/${state.botSlug}/confirm-delivery`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
-                body: JSON.stringify({ session_id: sessionId, user_info: newUserInfo })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': state.csrfToken
+                },
+                body: JSON.stringify({
+                    session_id: state.sessionId,
+                    b24_message_ids: b24MessageIds
+                })
             });
-            const data = await response.json();
-
-            // Обновляем состояние и UI
-            userInfo = data.user_info;
-            conversationId = data.conversation_id;
-            localStorage.setItem('chat_user_info_' + config.botSlug, JSON.stringify(userInfo));
-            displayChatInterface(data.messages);
-            
-            // Добавляем приветственное сообщение, если история пуста
-            if (!data.messages || data.messages.length === 0) {
-                 const welcomeMsg = botSettings.welcome_message || `Здравствуйте, ${userInfo.name}! Чем могу помочь?`;
-                 addMessageToChat('assistant', welcomeMsg);
-            }
-
         } catch (error) {
-            console.error('Failed to start session with user info:', error);
-            addMessageToChat('assistant', 'Не удалось начать чат. Пожалуйста, попробуйте снова.');
+            console.error('Delivery confirmation failed:', error);
         }
     }
-    
-    // --- Логика чата ---
 
     async function sendMessage() {
         const input = document.getElementById('messageInput');
-        const message = input.value.trim();
-        if (!message) return;
+        const messageText = input.value.trim();
+        if (!messageText) return;
 
-        document.getElementById('sendButton').disabled = true;
-        addMessageToChat('user', message);
+        // 1. Очищаем поле ввода
         input.value = '';
+
+        // 2. Сразу показываем индикатор загрузки и блокируем кнопку
         showTypingIndicator();
+        document.getElementById('sendButton').disabled = true;
+        log('Отправка сообщения...', { text: messageText });
 
         try {
-            const response = await fetch(config.apiUrl + '/message', {
+            // 3. Отправляем сообщение на сервер.
+            // Мы не добавляем его в чат вручную. Поллинг его получит вместе с ответом бота.
+            await fetch(`/widget/${state.botSlug}/message`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': config.csrfToken },
-                body: JSON.stringify({ message, session_id: sessionId })
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
+                body: JSON.stringify({ message: messageText, session_id: state.sessionId })
             });
-            const data = await response.json();
-
-            if (data.error) {
-                addMessageToChat('assistant', data.error);
-            } else {
-                conversationId = data.conversation_id;
-                addMessageToChat('assistant', data.message.content, new Date(data.message.created_at));
-            }
+            log('Сообщение отправлено. Ожидаем ответ через поллинг.');
         } catch (error) {
-            console.error('Failed to send message:', error);
-            addMessageToChat('assistant', 'Произошла ошибка. Пожалуйста, попробуйте позже.');
-        } finally {
+            log('ОШИБКА отправки сообщения', error);
+            addMessageToChat('assistant', 'Ошибка отправки. Пожалуйста, попробуйте еще раз.');
+            // В случае ошибки прячем индикатор
             hideTypingIndicator();
+        } finally {
+            // Разблокируем кнопку в любом случае
             document.getElementById('sendButton').disabled = false;
         }
     }
 
-    function loadMessageHistory(messages) {
-        if (messages && messages.length > 0) {
-            messages.forEach(msg => addMessageToChat(msg.role, msg.content, new Date(msg.created_at)));
+    // Добавьте эти две функции рядом с sendMessage
+    function showTypingIndicator() {
+        document.getElementById('typingIndicator').classList.add('active');
+        const messagesContainer = document.getElementById('chatMessages');
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+        document.getElementById('typingIndicator').classList.remove('active');
+    }
+
+    /**
+     * 3. Регулярный опрос сервера на новые сообщения
+     */
+    async function pollNewMessages() {
+        if (state.isPolling) {
+            log('Поллинг уже выполняется. Пропускаем.');
+            return;
+        }
+        
+        state.isPolling = true;
+        log(`Опрос на новые сообщения после ID: ${state.lastMessageId}`);
+
+        try {
+            const response = await fetch(`/widget/${state.botSlug}/poll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
+                body: JSON.stringify({ session_id: state.sessionId, last_message_id: state.lastMessageId })
+            });
+
+            if (!response.ok) throw new Error('Poll request failed');
+
+            const data = await response.json();
+            if (data.messages && data.messages.length > 0) {
+                log(`Получено ${data.messages.length} новых сообщений.`);
+                
+                hideTypingIndicator();
+                // --- НОВЫЙ КОД: Массив для ID, которые нужно подтвердить ---
+                const b24MessageIdsToConfirm = [];
+
+                data.messages.forEach(msg => {
+                    addMessageToChat(msg.role, msg.content, new Date(msg.created_at), msg.id);
+                    state.lastMessageId = msg.id;
+
+                    // Если у сообщения есть ID из Битрикс24, добавляем его в массив для подтверждения
+                    if (msg.metadata && msg.metadata.bitrix24_message_id) {
+                        b24MessageIdsToConfirm.push(msg.metadata.bitrix24_message_id);
+                    }
+                });
+
+                // После добавления всех сообщений, отправляем подтверждение, если есть что подтверждать
+                if (b24MessageIdsToConfirm.length > 0) {
+                    await confirmDelivery(b24MessageIdsToConfirm);
+                    log(`Отправлено подтверждение для ${b24MessageIdsToConfirm.length} сообщений.`);
+                }
+                // --- КОНЕЦ НОВОГО КОДА ---
+
+                log(`Поллинг завершен. ID последнего сообщения: ${state.lastMessageId}`);
+            } else {
+                log('Новых сообщений не найдено.');
+            }
+        } catch (error) {
+            log('ОШИБКА во время поллинга', error);
+        } finally {
+            state.isPolling = false;
         }
     }
 
-    function addMessageToChat(role, content, timestamp = new Date()) {
+    // --- УТИЛИТЫ ---
+
+    function startPolling() {
+        stopPolling(); // Останавливаем старый, если есть
+        state.pollingInterval = setInterval(pollNewMessages, 3000); // Опрашиваем каждые 3 секунды
+        log('Polling started.');
+    }
+
+    function stopPolling() {
+        if (state.pollingInterval) {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            log('Polling stopped.');
+        }
+    }
+    
+    function addMessageToChat(role, content, timestamp = new Date(), messageId = null) {
+        // Проверяем, не существует ли уже сообщение с таким ID в чате
+        if (messageId && document.getElementById(`msg-${messageId}`)) {
+            log(`Сообщение ${messageId} уже отображено. Пропускаем дубликат.`);
+            return;
+        }
+
         const messagesContainer = document.getElementById('chatMessages');
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
+        
+        // Присваиваем уникальный ID элементу для предотвращения дублирования
+        if (messageId) {
+            messageDiv.id = `msg-${messageId}`;
+        }
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
         
         const textDiv = document.createElement('div');
-        textDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
+        // Используем textContent для безопасной вставки текста, а затем заменяем переносы строк
+        textDiv.innerHTML = formatMessageContent(content);
+        //textDiv.innerHTML = textDiv.innerHTML.replace(/\n/g, '<br>');
         
         const timeDiv = document.createElement('div');
         timeDiv.className = 'message-time';
-        timeDiv.textContent = formatTime(timestamp);
+        timeDiv.textContent = new Date(timestamp).toLocaleTimeString('ru-RU', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
 
         contentDiv.appendChild(textDiv);
         contentDiv.appendChild(timeDiv);
@@ -580,30 +658,178 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    function formatMessageContent(text) {
+        // Сначала экранируем HTML
+        let escaped = escapeHtml(text);
+        
+        // Регулярное выражение для проверки, является ли URL изображением
+        const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i;
+        
+        // Сначала обрабатываем markdown ссылки формата [текст](url)
+        escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, linkText, url) {
+            // Очищаем URL от возможных HTML entities
+            const cleanUrl = url.replace(/&amp;/g, '&');
+            
+            if (imageExtensions.test(cleanUrl)) {
+                // Если это изображение, создаем элемент img
+                return `
+                    <div class="message-image-container" style="margin: 8px 0;">
+                        <img src="${cleanUrl}" 
+                             alt="${linkText}" 
+                             title="${linkText}"
+                             class="message-image"
+                             onclick="openImageModal('${cleanUrl}')"
+                             onerror="this.onerror=null; this.parentElement.innerHTML='<a href=\\'${cleanUrl}\\' target=\\'_blank\\' style=\\'color: #667eea; text-decoration: underline;\\'>${linkText}</a>';"
+                             style="max-width: 100%; max-height: 300px; border-radius: 8px; cursor: pointer; display: block;">
+                        <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                            <span>${linkText}</span> • 
+                            <a href="${cleanUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">Открыть в новой вкладке</a>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Если это обычная ссылка, используем текст из markdown
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: underline; word-break: break-all;">${linkText}</a>`;
+            }
+        });
+        
+        // Затем обрабатываем обычные URL (которые не в markdown формате)
+        // Но только те, которые еще не были обработаны
+        const urlRegex = /(?<![\(\[])(https?:\/\/[^\s<>\[\]()]+)(?![\)\]])/gi;
+        
+        escaped = escaped.replace(urlRegex, function(url) {
+            // Проверяем, не находится ли URL уже внутри тега <a> или <img>
+            // Это нужно чтобы не обрабатывать уже обработанные URL
+            if (url.includes('href=') || url.includes('src=')) {
+                return url;
+            }
+            
+            // Очищаем URL от возможных HTML entities
+            const cleanUrl = url.replace(/&amp;/g, '&');
+            
+            if (imageExtensions.test(cleanUrl)) {
+                // Если это изображение
+                return `
+                    <div class="message-image-container" style="margin: 8px 0;">
+                        <img src="${cleanUrl}" 
+                             alt="Изображение" 
+                             class="message-image"
+                             onclick="openImageModal('${cleanUrl}')"
+                             onerror="this.onerror=null; this.parentElement.innerHTML='<a href=\\'${cleanUrl}\\' target=\\'_blank\\' style=\\'color: #667eea; text-decoration: underline;\\'>Изображение недоступно (открыть ссылку)</a>';"
+                             style="max-width: 100%; max-height: 300px; border-radius: 8px; cursor: pointer; display: block;">
+                        <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                            <a href="${cleanUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">Открыть в новой вкладке</a>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Если это обычная ссылка
+                let displayText = cleanUrl;
+                try {
+                    const urlObj = new URL(cleanUrl);
+                    displayText = urlObj.hostname + (urlObj.pathname !== '/' ? urlObj.pathname : '');
+                    if (displayText.length > 50) {
+                        displayText = displayText.substring(0, 47) + '...';
+                    }
+                } catch (e) {
+                    if (displayText.length > 50) {
+                        displayText = displayText.substring(0, 47) + '...';
+                    }
+                }
+                
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: underline; word-break: break-all;">${displayText}</a>`;
+            }
+        });
+        
+        // Заменяем переносы строк на <br>
+        escaped = escaped.replace(/\n/g, '<br>');
+        
+        return escaped;
+    }
+
+    // Функция для открытия модального окна с изображением
+    function openImageModal(imageUrl) {
+        // Создаем модальное окно
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            cursor: pointer;
+            animation: fadeIn 0.3s ease;
+        `;
+        
+        // Добавляем изображение
+        const img = document.createElement('img');
+        img.src = imageUrl;
+        img.style.cssText = `
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+        `;
+        
+        // Добавляем кнопку закрытия
+        const closeBtn = document.createElement('div');
+        closeBtn.innerHTML = '✕';
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            transition: background 0.3s;
+        `;
+        closeBtn.onmouseover = function() { this.style.background = 'rgba(255, 255, 255, 0.2)'; };
+        closeBtn.onmouseout = function() { this.style.background = 'rgba(255, 255, 255, 0.1)'; };
+        
+        // Добавляем элементы в модальное окно
+        modal.appendChild(img);
+        modal.appendChild(closeBtn);
+        
+        // Закрытие по клику
+        modal.onclick = function(e) {
+            if (e.target === modal || e.target === closeBtn) {
+                modal.style.animation = 'fadeOut 0.3s ease';
+                setTimeout(() => document.body.removeChild(modal), 300);
+            }
+        };
+        
+        // Закрытие по Escape
+        const escapeHandler = function(e) {
+            if (e.key === 'Escape') {
+                modal.style.animation = 'fadeOut 0.3s ease';
+                setTimeout(() => document.body.removeChild(modal), 300);
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+        
+        // Добавляем модальное окно на страницу
+        document.body.appendChild(modal);
+    }
+    
     function handleKeyPress(event) {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             sendMessage();
         }
-    }
-
-    function showTypingIndicator() {
-        document.getElementById('typingIndicator').classList.add('active');
-        const messagesContainer = document.getElementById('chatMessages');
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-
-    function hideTypingIndicator() {
-        document.getElementById('typingIndicator').classList.remove('active');
-    }
-    
-    // --- Утилиты ---
-
-    function formatTime(date) {
-        if (!(date instanceof Date)) date = new Date(date);
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        return `${hours}:${minutes}`;
     }
 
     function escapeHtml(text) {
@@ -612,131 +838,9 @@
         return div.innerHTML;
     }
 
-    // --- Запуск и завершение ---
-
+    // --- ЗАПУСК ---
     document.addEventListener('DOMContentLoaded', initChat);
 
-    window.addEventListener('beforeunload', () => {
-        if (conversationId && sessionId) {
-            navigator.sendBeacon(
-                config.apiUrl + '/end',
-                JSON.stringify({
-                    session_id: sessionId,
-                    conversation_id: conversationId,
-                    _token: config.csrfToken
-                })
-            );
-        }
-    });
-
-    let lastMessageId = null;
-    let pollingInterval = null;
-
-    function startPolling() { // Убрали аргументы
-        if (pollingInterval) clearInterval(pollingInterval);
-        
-        pollingInterval = setInterval(() => {
-            pollNewMessages();
-        }, 3000); // Можно увеличить интервал до 3 секунд
-    }
-
-    function stopPolling() {
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-        }
-    }
-
-    async function pollNewMessages() { // Убрали аргументы, они берутся из глобальных переменных
-        try {
-            const response = await fetch(`/widget/${config.botSlug}/poll`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrfToken
-                },
-                body: JSON.stringify({
-                    session_id: sessionId,
-                    last_message_id: lastMessageId
-                })
-            });
-
-            if (!response.ok) return;
-
-            const data = await response.json();
-            
-            if (data.messages && data.messages.length > 0) {
-                const b24MessageIdsToConfirm = []; // Массив для ID, которые нужно подтвердить
-
-                data.messages.forEach(message => {
-                    // Добавляем сообщение в чат
-                    addMessageToChat(message.role, message.content, new Date(message.created_at)); // Используем старую функцию addMessageToChat
-                    lastMessageId = message.id;
-
-                    // Если у сообщения есть B24 ID, добавляем его в массив для подтверждения
-                    if (message.metadata && message.metadata.bitrix24_message_id) {
-                        b24MessageIdsToConfirm.push(message.metadata.bitrix24_message_id);
-                    }
-                });
-
-                // После добавления всех сообщений, отправляем подтверждение
-                if (b24MessageIdsToConfirm.length > 0) {
-                    await confirmDelivery(b24MessageIdsToConfirm);
-                }
-            }
-            
-            // ... (обработка статуса диалога, если нужно)
-
-        } catch (error) {
-            console.error('Polling error:', error);
-        }
-    }
-
-    function appendMessageToChat(message) {
-        const chatContainer = document.getElementById('chat-messages');
-        if (!chatContainer) return;
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${message.role}`;
-        
-        // Добавляем имя оператора если есть
-        if (message.role === 'operator' && message.metadata?.operator_name) {
-            messageDiv.innerHTML = `
-                <div class="operator-name">${message.metadata.operator_name}</div>
-                <div class="message-content">${message.content}</div>
-            `;
-        } else {
-            messageDiv.textContent = message.content;
-        }
-        
-        chatContainer.appendChild(messageDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-    async function confirmDelivery(b24MessageIds) {
-        if (!b24MessageIds || b24MessageIds.length === 0) {
-            return;
-        }
-        
-        try {
-            await fetch(`/widget/${config.botSlug}/confirm-delivery`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrfToken
-                },
-                body: JSON.stringify({
-                    session_id: sessionId,
-                    b24_message_ids: b24MessageIds
-                })
-            });
-        } catch (error) {
-            console.error('Delivery confirmation failed:', error);
-        }
-    }
-
-    // Запускаем polling после инициализации виджета
-    // Добавьте это в код инициализации виджета
-    startPolling();
 </script>
 </body>
 </html>

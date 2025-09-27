@@ -15,6 +15,10 @@ class ConversationObserver
     
     public function created(Conversation $conversation): void
     {
+        if ($conversation->messages()->where('role', 'user')->doesntExist()) {
+            Log::info("Conversation {$conversation->id} created but has no user messages. Skipping initial CRM sync.");
+            return;
+        }
         // Предотвращаем дублирование обработки
         $lockKey = "conversation_processing_" . $conversation->id;
         

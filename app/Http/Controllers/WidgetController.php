@@ -184,64 +184,32 @@ class WidgetController extends Controller
             return response()->json(['error' => 'Bot is not active'], 400);
         }
 
-        $channel = $bot->channels()->where('type', 'web')->where('is_active', true)->first();
+        $channel = $bot->channels()->where('type', 'web')->where('is_active', true)->firstOrFail();
 
-        if (!$channel) {
-            Log::warning('Web channel not available for bot', ['bot_id' => $bot->id]);
-            return response()->json(['error' => 'Channel not available'], 404);
-        }
-        
-        // Находим активный диалог
-        $conversation = Conversation::where('bot_id', $bot->id)
+        // Находим диалог по session_id
+        $conversation = Conversation::where('external_id', $request->session_id)
+            ->where('bot_id', $bot->id)
             ->where('channel_id', $channel->id)
-            ->where('external_id', $request->session_id)
-            ->where('status', 'active')
             ->first();
             
         if (!$conversation) {
-            Log::error('Conversation not found for session', [
+            Log::error('Conversation not found for session during sendMessage. This should not happen.', [
                 'session_id' => $request->session_id,
-                'bot_id' => $bot->id,
-                'channel_id' => $channel->id
             ]);
-            
-            // Пытаемся найти любой диалог с этим session_id (возможно закрытый)
-            $anyConversation = Conversation::where('bot_id', $bot->id)
-                ->where('channel_id', $channel->id)
-                ->where('external_id', $request->session_id)
-                ->first();
-                
-            if ($anyConversation) {
-                Log::info('Found closed conversation, reopening', [
-                    'conversation_id' => $anyConversation->id,
-                    'status' => $anyConversation->status
-                ]);
-                
-                // Переоткрываем диалог
-                $anyConversation->update(['status' => 'active']);
-                $conversation = $anyConversation;
-            } else {
-                return response()->json(['error' => 'Conversation not found. Please re-initialize.'], 404);
-            }
+            return response()->json(['error' => 'Conversation not found. Please re-initialize.'], 404);
         }
 
-        // Обновляем пользовательские данные если переданы
+        // Проверяем, был ли этот диалог уже синхронизирован с Битрикс24
+        // (наличие chat_id - самый надежный признак)
+        $wasAlreadySynced = isset($conversation->metadata['bitrix24_chat_id']);
+
+        // Обновляем данные пользователя, если они переданы (например, имя, email)
         $userInfo = $request->input('user_info');
-        if ($userInfo && (!$conversation->user_name || !$conversation->user_email)) {
+        if ($userInfo) {
             $updateData = [];
-            
-            if (!empty($userInfo['name']) && !$conversation->user_name) {
-                $updateData['user_name'] = $userInfo['name'];
-            }
-            
-            if (!empty($userInfo['email']) && !$conversation->user_email) {
-                $updateData['user_email'] = $userInfo['email'];
-            }
-            
-            if (!empty($userInfo['phone']) && !$conversation->user_phone) {
-                $updateData['user_phone'] = $userInfo['phone'];
-            }
-            
+            if (!empty($userInfo['name']) && !$conversation->user_name) $updateData['user_name'] = $userInfo['name'];
+            if (!empty($userInfo['email']) && !$conversation->user_email) $updateData['user_email'] = $userInfo['email'];
+            if (!empty($userInfo['phone']) && !$conversation->user_phone) $updateData['user_phone'] = $userInfo['phone'];
             if (!empty($updateData)) {
                 $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
                 $conversation->update($updateData);
@@ -251,25 +219,39 @@ class WidgetController extends Controller
         DB::beginTransaction();
         
         try {
+            // 1. Сохраняем сообщение пользователя в нашу базу
             $userMessage = $conversation->messages()->create([
                 'role' => 'user',
                 'content' => $request->message,
             ]);
 
+            // 2. Запускаем создание чата в Битрикс24 ТОЛЬКО ОДИН РАЗ
+            // Если диалог еще не был синхронизирован, запускаем обработчик
+            if (!$wasAlreadySynced) {
+                Log::info("First user message in unsynced conversation {$conversation->id}. Triggering CRM sync.", [
+                    'message_id' => $userMessage->id
+                ]);
+                // Этот вызов создаст чат в Битрикс24 и сохранит нужные ID в metadata диалога
+                (new \App\Observers\ConversationObserver())->created($conversation);
+            }
+
+            // 3. Обновляем счетчики и время
             $conversation->increment('messages_count');
             $conversation->update(['last_message_at' => now()]);
 
+            // 4. Генерируем ответ от AI
             $responseContent = '';
             $responseTime = 0;
 
             if (!$bot->isWorkingHours()) {
-                $responseContent = $bot->settings['offline_message'] ?? 'К сожалению, мы сейчас не в сети. Пожалуйста, напишите нам позже или оставьте свои контактные данные.';
+                $responseContent = $bot->settings['offline_message'] ?? 'К сожалению, мы сейчас не в сети. Пожалуйста, напишите нам позже.';
             } else {
                 $startTime = microtime(true);
                 $responseContent = $this->aiService->generateResponse($bot, $conversation, $request->message);
                 $responseTime = microtime(true) - $startTime;
             }
 
+            // 5. Сохраняем ответ бота в нашу базу
             $botMessage = $conversation->messages()->create([
                 'role' => 'assistant',
                 'content' => $responseContent,
@@ -280,6 +262,8 @@ class WidgetController extends Controller
 
             DB::commit();
 
+            // 6. Отправляем ответ бота в виджет
+            // Ответ в Битрикс24 отправится автоматически через MessageObserver
             return response()->json([
                 'message' => [
                     'id' => $botMessage->id,
@@ -338,61 +322,44 @@ class WidgetController extends Controller
             'session_id' => 'required|string',
             'last_message_id' => 'nullable|integer',
         ]);
-        
-        Log::info('Poll request received', [
+
+        $lastMessageId = $request->input('last_message_id', 0);
+
+        Log::info('[WidgetController] Poll request received', [
             'bot_id' => $bot->id,
-            'session_id' => $request->session_id,
-            'last_message_id' => $request->last_message_id
+            'polling_after_message_id' => $lastMessageId
         ]);
         
-        $channel = $bot->channels()->where('type', 'web')->where('is_active', true)->first();
-        if (!$channel) {
-            return response()->json(['error' => 'Channel not available'], 404);
-        }
-        
-        $conversation = Conversation::where('bot_id', $bot->id)
-            ->where('channel_id', $channel->id)
-            ->where('external_id', $request->session_id)
+        $conversation = Conversation::where('external_id', $request->session_id)
+            ->where('bot_id', $bot->id)
             ->first();
             
         if (!$conversation) {
-            Log::warning('Conversation not found for polling', [
-                'bot_id' => $bot->id,
-                'session_id' => $request->session_id
-            ]);
-            return response()->json(['error' => 'Conversation not found'], 404);
+            return response()->json(['messages' => []]);
         }
         
-        $query = $conversation->messages();
-        
-        if ($request->last_message_id) {
-            $query->where('id', '>', $request->last_message_id);
-        }
-        
-        $messages = $query->orderBy('created_at', 'asc')->get()
+        $messages = $conversation->messages()
+            ->where('id', '>', $lastMessageId)
+            ->orderBy('id', 'asc')
+            ->get()
             ->map(function ($message) {
                 return [
                     'id' => $message->id,
                     'role' => $message->role,
                     'content' => $message->content,
                     'created_at' => $message->created_at->toIso8601String(),
-                    'metadata' => [
-                        'operator_name' => $message->metadata['operator_name'] ?? null,
-                        'from_bitrix24' => $message->metadata['from_bitrix24'] ?? false,
-                        'bitrix24_message_id' => $message->metadata['bitrix24_message_id'] ?? null,
-                    ]
+                    // --- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: Гарантированно добавляем metadata ---
+                    'metadata' => $message->metadata ?? [] 
                 ];
             });
         
-        // Log::info('Poll response', [
-        //     'conversation_id' => $conversation->id,
-        //     'messages_count' => $messages->count(),
-        //     'last_message_id' => $messages->last()?->get('id')
-        // ]);
+        Log::info('[WidgetController] Poll response sending', [
+            'conversation_id' => $conversation->id,
+            'messages_found' => $messages->count()
+        ]);
         
         return response()->json([
             'messages' => $messages,
-            'conversation_status' => $conversation->status,
         ]);
     }
 
@@ -404,6 +371,12 @@ class WidgetController extends Controller
         ]);
 
         $b24MessageIds = array_filter($request->input('b24_message_ids'));
+
+
+        Log::channel('bitrix24')->info('[ConfirmDelivery] Received request from widget', [
+            'session_id' => $request->session_id,
+            'b24_ids_to_confirm' => $b24MessageIds,
+        ]);
 
         if (empty($b24MessageIds)) {
             return response()->json(['success' => true, 'message' => 'No IDs to confirm.']);
