@@ -65,6 +65,22 @@ class Bot extends Model
         return $this->hasOne(KnowledgeBase::class);
     }
 
+    /**
+     * Функции бота
+     */
+    public function functions(): HasMany
+    {
+        return $this->hasMany(BotFunction::class);
+    }
+
+    /**
+     * Намерения (intents) для AI
+     */
+    public function intents(): HasMany
+    {
+        return $this->hasMany(BotIntent::class);
+    }
+
     public function crmIntegrations()
     {
         return $this->belongsToMany(CrmIntegration::class, 'bot_crm_integrations')

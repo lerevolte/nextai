@@ -351,6 +351,112 @@
             font-size: 12px;
             opacity: 0.7;
         }
+        .close-button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+            color: white;
+        }
+
+        .close-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .close-button:active {
+            transform: scale(0.95);
+        }
+
+        /* Для мобильных устройств делаем кнопку немного больше */
+        @media (max-width: 768px) {
+            .close-button {
+                width: 36px;
+                height: 36px;
+            }
+            
+            .chat-header {
+                padding: 12px;
+            }
+            
+            .bot-info {
+                flex: 1;
+                margin-right: 8px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .chat-container {
+                height: 100vh;
+                max-height: 100vh;
+            }
+            
+            .chat-header {
+                padding: 12px;
+                min-height: 60px;
+            }
+            
+            .bot-name {
+                font-size: 14px;
+            }
+            
+            .bot-status {
+                font-size: 11px;
+            }
+            
+            .chat-messages {
+                padding: 12px;
+            }
+            
+            .message-content {
+                max-width: 85%;
+                font-size: 14px;
+            }
+            
+            .chat-input {
+                padding: 12px;
+            }
+            
+            .input-field {
+                font-size: 16px; /* Предотвращает zoom на iOS */
+                padding: 10px 14px;
+            }
+            
+            .contact-form {
+                margin: 12px;
+                padding: 16px;
+            }
+            
+            .contact-form h3 {
+                font-size: 16px;
+            }
+            
+            .form-group input {
+                font-size: 16px; /* Предотвращает zoom на iOS */
+                padding: 12px;
+            }
+        }
+
+        /* Для очень маленьких экранов */
+        @media (max-width: 375px) {
+            .bot-avatar {
+                width: 36px;
+                height: 36px;
+                font-size: 16px;
+            }
+            
+            .message-content {
+                max-width: 90%;
+                padding: 10px 14px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -364,6 +470,12 @@
                 <span>Онлайн</span>
             </div>
         </div>
+        <button class="close-button" onclick="closeChat()" title="Закрыть чат">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
     </div>
 
     <div class="chat-messages" id="chatMessages">
@@ -439,8 +551,28 @@
      */
     async function initChat() {
         log('Initializing chat...');
-        document.getElementById('chatMessages').innerHTML = '<div class="typing-indicator" id="typingIndicator"><span></span><span></span><span></span></div>'; // Очищаем чат
-        state.lastMessageId = 0; // Сбрасываем ID последнего сообщения
+        
+        // Проверяем, что все необходимые элементы существуют
+        const chatMessages = document.getElementById('chatMessages');
+        const contactForm = document.getElementById('contactForm');
+        const chatInputContainer = document.getElementById('chatInputContainer');
+        const typingIndicator = document.getElementById('typingIndicator');
+        
+        if (!chatMessages || !contactForm || !chatInputContainer) {
+            log('ERROR: Required DOM elements not found');
+            return;
+        }
+        
+        // Очищаем чат, но сохраняем форму контактов и индикатор загрузки
+        const existingContactForm = contactForm.cloneNode(true);
+        const existingTypingIndicator = typingIndicator ? typingIndicator.cloneNode(true) : createTypingIndicator();
+        
+        chatMessages.innerHTML = '';
+
+        chatMessages.appendChild(existingContactForm);
+        chatMessages.appendChild(existingTypingIndicator);
+        
+        state.lastMessageId = 0;
 
         try {
             const response = await fetch(`/widget/${state.botSlug}/initialize`, {
@@ -461,24 +593,169 @@
             localStorage.setItem(`chat_session_${state.botSlug}`, state.sessionId);
 
             // Настраиваем UI
-            document.getElementById('botName').textContent = state.botSettings.name || 'Чат-бот';
-            document.getElementById('botAvatar').textContent = (state.botSettings.name || 'Б').charAt(0).toUpperCase();
+            const botNameElement = document.getElementById('botName');
+            const botAvatarElement = document.getElementById('botAvatar');
             
-            // Загружаем историю и обновляем lastMessageId
-            if (data.messages && data.messages.length > 0) {
-                data.messages.forEach(msg => addMessageToChat(msg.role, msg.content, new Date(msg.created_at), msg.id)); // Добавляем msg.id
-                state.lastMessageId = data.messages[data.messages.length - 1].id;
-                log(`History loaded. Last message ID is now: ${state.lastMessageId}`);
+            if (botNameElement) {
+                botNameElement.textContent = state.botSettings.name || 'Чат-бот';
             }
-
-            // Показываем чат и запускаем поллинг
-            document.getElementById('chatInputContainer').classList.remove('hidden');
-            startPolling();
+            if (botAvatarElement) {
+                botAvatarElement.textContent = (state.botSettings.name || 'Б').charAt(0).toUpperCase();
+            }
+            
+            // Проверяем, нужно ли собирать контакты
+            const isNewUser = (!data.messages || data.messages.length === 0);
+            const needsContactInfo = /*state.botSettings.collect_contacts && */!state.userInfo && isNewUser;
+            // console.log(state.botSettings);
+            // console.log(state.userInfo)
+            // console.log(isNewUser)
+            // console.log(data.messages)
+            // Получаем актуальные ссылки на элементы после очистки
+            const currentContactForm = document.getElementById('contactForm');
+            const currentChatInput = document.getElementById('chatInputContainer');
+            const userInfoBadge = document.getElementById('userInfoBadge');
+            
+            if (needsContactInfo && currentContactForm && currentChatInput) {
+                // Показываем форму сбора контактов
+                currentContactForm.classList.remove('hidden');
+                currentChatInput.classList.add('hidden');
+                log('Showing contact form for new user');
+            } else {
+                // Показываем обычный чат
+                if (currentContactForm) currentContactForm.classList.add('hidden');
+                if (currentChatInput) currentChatInput.classList.remove('hidden');
+                
+                // Показываем информацию о пользователе, если есть
+                if (state.userInfo && state.userInfo.name && userInfoBadge) {
+                    const userDisplayName = document.getElementById('userDisplayName');
+                    if (userDisplayName) {
+                        userDisplayName.textContent = state.userInfo.name;
+                    }
+                    userInfoBadge.classList.add('show');
+                }
+                
+                // Загружаем историю
+                if (data.messages && data.messages.length > 0) {
+                    data.messages.forEach(msg => addMessageToChat(msg.role, msg.content, new Date(msg.created_at), msg.id));
+                    state.lastMessageId = data.messages[data.messages.length - 1].id;
+                    log(`History loaded. Last message ID is now: ${state.lastMessageId}`);
+                }
+                
+                // Запускаем поллинг
+                startPolling();
+            }
 
         } catch (error) {
             log('ERROR during initialization', error);
+            // Показываем сообщение об ошибке
+            addMessageToChat('assistant', 'Произошла ошибка при инициализации чата. Пожалуйста, обновите страницу.');
         }
     }
+
+    function createTypingIndicator() {
+        const indicator = document.createElement('div');
+        indicator.className = 'typing-indicator';
+        indicator.id = 'typingIndicator';
+        indicator.innerHTML = '<span></span><span></span><span></span>';
+        return indicator;
+    }
+
+    async function submitContactForm() {
+        const nameInput = document.getElementById('userName');
+        const emailInput = document.getElementById('userEmail');
+        const phoneInput = document.getElementById('userPhone');
+        const nameError = document.getElementById('userNameError');
+        
+        if (!nameInput) {
+            log('ERROR: Contact form inputs not found');
+            return;
+        }
+        
+        const name = nameInput.value.trim();
+        const email = emailInput ? emailInput.value.trim() : '';
+        const phone = phoneInput ? phoneInput.value.trim() : '';
+        
+        // Валидация
+        if (!name) {
+            if (nameError) nameError.classList.add('show');
+            return;
+        }
+        
+        // Скрываем ошибки
+        if (nameError) nameError.classList.remove('show');
+        
+        // Сохраняем информацию
+        state.userInfo = { name, email, phone };
+        
+        // Скрываем форму и показываем чат
+        const contactForm = document.getElementById('contactForm');
+        const chatInputContainer = document.getElementById('chatInputContainer');
+        const userInfoBadge = document.getElementById('userInfoBadge');
+        const userDisplayName = document.getElementById('userDisplayName');
+        
+        if (contactForm) contactForm.classList.add('hidden');
+        if (chatInputContainer) chatInputContainer.classList.remove('hidden');
+        
+        // Показываем бейдж с именем
+        if (name && userInfoBadge && userDisplayName) {
+            userDisplayName.textContent = name;
+            userInfoBadge.classList.add('show');
+        }
+        
+        // Запускаем поллинг
+        startPolling();
+        
+        // Отправляем первое сообщение с контактными данными
+        const firstMessage = `Здравствуйте, меня зовут ${name}`;
+        await sendMessageWithUserInfo(firstMessage, state.userInfo);
+    }
+
+    function skipContactForm() {
+        const contactForm = document.getElementById('contactForm');
+        const chatInputContainer = document.getElementById('chatInputContainer');
+        
+        if (contactForm) contactForm.classList.add('hidden');
+        if (chatInputContainer) chatInputContainer.classList.remove('hidden');
+        
+        startPolling();
+    }
+
+    async function sendMessageWithUserInfo(messageText, userInfo) {
+        // Добавляем сообщение пользователя в чат
+        addMessageToChat('user', messageText, new Date());
+        
+        showTypingIndicator();
+        const sendButton = document.getElementById('sendButton');
+        if (sendButton) sendButton.disabled = true;
+        
+        try {
+            const response = await fetch(`/widget/${state.botSlug}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
+                body: JSON.stringify({ 
+                    message: messageText, 
+                    session_id: state.sessionId,
+                    user_info: userInfo
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                hideTypingIndicator();
+                if (data.message) {
+                    addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
+                    state.lastMessageId = data.message.id;
+                }
+            }
+        } catch (error) {
+            log('ERROR sending message with user info', error);
+            hideTypingIndicator();
+            addMessageToChat('assistant', 'Произошла ошибка. Пожалуйста, попробуйте еще раз.');
+        } finally {
+            if (sendButton) sendButton.disabled = false;
+        }
+    }
+
     async function confirmDelivery(b24MessageIds) {
         if (!b24MessageIds || b24MessageIds.length === 0) {
             return;
@@ -503,34 +780,55 @@
 
     async function sendMessage() {
         const input = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        
+        if (!input || !sendButton) {
+            log('ERROR: Input or button not found');
+            return;
+        }
+        
         const messageText = input.value.trim();
         if (!messageText) return;
 
         // 1. Очищаем поле ввода
         input.value = '';
+        
+        // 2. СРАЗУ добавляем сообщение пользователя в чат
+        addMessageToChat('user', messageText, new Date());
 
-        // 2. Сразу показываем индикатор загрузки и блокируем кнопку
+        // 3. Показываем индикатор загрузки и блокируем кнопку
         showTypingIndicator();
-        document.getElementById('sendButton').disabled = true;
+        sendButton.disabled = true;
         log('Отправка сообщения...', { text: messageText });
 
         try {
-            // 3. Отправляем сообщение на сервер.
-            // Мы не добавляем его в чат вручную. Поллинг его получит вместе с ответом бота.
-            await fetch(`/widget/${state.botSlug}/message`, {
+            // 4. Отправляем сообщение на сервер
+            const response = await fetch(`/widget/${state.botSlug}/message`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
-                body: JSON.stringify({ message: messageText, session_id: state.sessionId })
+                body: JSON.stringify({ 
+                    message: messageText, 
+                    session_id: state.sessionId,
+                    user_info: state.userInfo
+                })
             });
-            log('Сообщение отправлено. Ожидаем ответ через поллинг.');
+            
+            if (response.ok) {
+                const data = await response.json();
+                hideTypingIndicator();
+                if (data.message) {
+                    addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
+                    state.lastMessageId = data.message.id;
+                }
+            } else {
+                throw new Error('Failed to send message');
+            }
         } catch (error) {
             log('ОШИБКА отправки сообщения', error);
-            addMessageToChat('assistant', 'Ошибка отправки. Пожалуйста, попробуйте еще раз.');
-            // В случае ошибки прячем индикатор
             hideTypingIndicator();
+            addMessageToChat('assistant', 'Ошибка отправки. Пожалуйста, попробуйте еще раз.');
         } finally {
-            // Разблокируем кнопку в любом случае
-            document.getElementById('sendButton').disabled = false;
+            sendButton.disabled = false;
         }
     }
 

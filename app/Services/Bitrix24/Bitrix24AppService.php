@@ -489,14 +489,67 @@ class Bitrix24AppService
                 $userId = $messageData['message']['user_id'] ?? null;
                 $rawText = $messageData['message']['text'] ?? '';
                 
+                // ДОБАВЛЯЕМ: Проверяем, не является ли это автоматическим приветствием от открытой линии
+                if (stripos($rawText, 'Меня зовут') !== false && stripos($rawText, 'консультант') !== false) {
+                    Log::info('Skipping Bitrix24 auto-greeting message', [
+                        'chat_id' => $chatId,
+                        'text_preview' => substr($rawText, 0, 50)
+                    ]);
+                    
+                    // Подтверждаем доставку, но не создаем сообщение
+                    try {
+                        $conversation = Conversation::where('metadata->bitrix24_chat_id', $chatId)
+                            ->orWhere('metadata->bitrix24_chat_id', (string)$chatId)
+                            ->first();
+                        if ($conversation) {
+                            $this->confirmMessageDelivery($conversation->bot, $messageData);
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to confirm delivery for auto-greeting', ['error' => $e->getMessage()]);
+                    }
+                    continue;
+                }
+                
+                // ДОБАВЛЯЕМ: Проверяем, не является ли это приветствием бота
+                if (stripos($rawText, 'виртуальный помощник') !== false || 
+                    stripos($rawText, 'Чем могу помочь') !== false ||
+                    stripos($rawText, 'Здравствуйте! Я') !== false) {
+                    Log::info('Skipping bot greeting message', [
+                        'chat_id' => $chatId,
+                        'text_preview' => substr($rawText, 0, 50)
+                    ]);
+                    continue;
+                }
+                
                 // Парсим текст от оператора (убираем BB-коды)
                 $operatorName = null;
                 $messageText = $rawText;
+                $isOperator = false;
                 
                 // Проверяем, есть ли имя оператора в тексте
                 if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
                     $operatorName = $matches[1];
                     $messageText = trim($matches[2]);
+                    
+                    // ДОБАВЛЯЕМ: Проверяем, что это действительно оператор, а не бот
+                    $botNames = ['бот', 'bot', 'арина', 'ассистент', 'assistant', 'виртуальный помощник'];
+                    $isOperator = true;
+                    foreach ($botNames as $botName) {
+                        if (stripos($operatorName, $botName) !== false) {
+                            $isOperator = false;
+                            break;
+                        }
+                    }
+                    
+                    // Если это не оператор, пропускаем
+                    if (!$isOperator) {
+                        Log::info('Skipping non-operator formatted message', [
+                            'sender_name' => $operatorName,
+                            'chat_id' => $chatId,
+                            'text_preview' => substr($messageText, 0, 50)
+                        ]);
+                        continue;
+                    }
                 } else {
                     // Просто убираем BB-коды
                     $messageText = preg_replace('/\[br\]/i', "\n", $messageText);
@@ -507,6 +560,7 @@ class Bitrix24AppService
                     'chat_id' => $chatId,
                     'user_id' => $userId,
                     'operator_name' => $operatorName,
+                    'is_operator' => $isOperator,
                     'original_text' => substr($rawText, 0, 50),
                     'parsed_text' => substr($messageText, 0, 50)
                 ]);
@@ -541,18 +595,29 @@ class Bitrix24AppService
                     'conversation_id' => $conversation->id,
                     'bitrix24_chat_id' => $conversation->metadata['bitrix24_chat_id'] ?? null
                 ]);
-
-                // Определяем роль: если есть имя оператора, значит это оператор
-                $role = $operatorName ? 'operator' : 'user';
                 
-                // Проверяем, не наше ли это сообщение
+                // ДОБАВЛЯЕМ: Проверяем, не является ли это эхо нашего последнего сообщения
+                $lastMessage = $conversation->messages()->latest()->first();
+                if ($lastMessage && trim($lastMessage->content) === trim($messageText)) {
+                    Log::info('Skipping echo message', [
+                        'conversation_id' => $conversation->id,
+                        'message_text' => substr($messageText, 0, 50)
+                    ]);
+                    $this->confirmMessageDelivery($conversation->bot, $messageData);
+                    continue;
+                }
+                
+                // Определяем роль: если есть имя оператора и это подтвержденный оператор, значит это оператор
+                $role = $isOperator ? 'operator' : 'user';
+                
+                // Проверяем, не наше ли это сообщение (от бота)
                 $bot = $conversation->bot;
                 if ($userId == ($bot->metadata['bitrix24_bot_id'] ?? null)) {
                     Log::info('Skipping bot message');
                     continue;
                 }
                 
-                // Проверяем на дубликаты
+                // Проверяем на дубликаты по ID сообщения Битрикс24
                 $bitrix24MessageId = $messageData['im']['message_id'] ?? $messageData['message']['id'] ?? null;
                 if ($bitrix24MessageId) {
                     $existingMessage = $conversation->messages()
@@ -573,14 +638,19 @@ class Bitrix24AppService
                         'from_bitrix24' => true,
                         'bitrix24_message_id' => $bitrix24MessageId,
                         'bitrix24_user_id' => $userId,
-                        'operator_name' => $operatorName ?? ($role === 'operator' ? 'Оператор' : null),
+                        'operator_name' => $isOperator ? ($operatorName ?? 'Оператор') : null,
                         'original_text' => $rawText,
                     ]
                 ]);
 
-                // Обновляем статус диалога
+                // Обновляем статус диалога только если это реальный оператор
                 if ($role === 'operator' && $conversation->status === 'active') {
                     $conversation->update(['status' => 'waiting_operator']);
+                    
+                    Log::info('Conversation status changed to waiting_operator', [
+                        'conversation_id' => $conversation->id,
+                        'operator_name' => $operatorName
+                    ]);
                 }
 
                 $conversation->increment('messages_count');
@@ -594,7 +664,7 @@ class Bitrix24AppService
                 ]);
                 
                 // Отправляем подтверждение доставки обратно в Битрикс24
-                $this->confirmMessageDelivery($integration, $messageData);
+                $this->confirmMessageDelivery($conversation->bot, $messageData);
                 
             }
 

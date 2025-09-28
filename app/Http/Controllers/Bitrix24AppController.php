@@ -1109,6 +1109,12 @@ class Bitrix24AppController extends Controller
             $message = $data['MESSAGE'] ?? [];
             $chat = $data['CHAT'] ?? [];
             $authorId = $data['AUTHOR_ID'] ?? null;
+
+            $messageText = $message['TEXT'] ?? '';
+            if (stripos($messageText, 'Меня зовут') !== false && stripos($messageText, 'консультант') !== false) {
+                Log::info('Ignoring Bitrix24 auto-greeting in open line');
+                return;
+            }
             
             if (empty($message) || empty($chat)) {
                 Log::warning('Empty message or chat data');
@@ -1132,6 +1138,12 @@ class Bitrix24AppController extends Controller
                 Log::warning('Conversation not found for chat', [
                     'chat_id' => $chatId
                 ]);
+                return;
+            }
+
+            $lastMessage = $conversation->messages()->latest()->first();
+            if ($lastMessage && trim($lastMessage->content) === trim($messageText)) {
+                Log::info('Skipping duplicate message in open line handler');
                 return;
             }
             

@@ -134,6 +134,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::post('/conversations/{conversation}/takeover', [ConversationController::class, 'takeover'])->name('conversations.takeover');
                 Route::post('/conversations/{conversation}/close', [ConversationController::class, 'close'])->name('conversations.close');
 
+                Route::prefix('functions')->group(function () {
+                    Route::get('/', [App\Http\Controllers\BotFunctionController::class, 'index'])->name('functions.index');
+                    Route::get('/create', [App\Http\Controllers\BotFunctionController::class, 'create'])->name('functions.create');
+                    Route::post('/', [App\Http\Controllers\BotFunctionController::class, 'store'])->name('functions.store');
+                    Route::get('/{function}', [App\Http\Controllers\BotFunctionController::class, 'show'])->name('functions.show');
+                    Route::get('/{function}/edit', [App\Http\Controllers\BotFunctionController::class, 'edit'])->name('functions.edit');
+                    Route::put('/{function}', [App\Http\Controllers\BotFunctionController::class, 'update'])->name('functions.update');
+                    Route::delete('/{function}', [App\Http\Controllers\BotFunctionController::class, 'destroy'])->name('functions.destroy');
+                    Route::post('/{function}/test', [App\Http\Controllers\BotFunctionController::class, 'test'])->name('functions.test');
+                    Route::post('/{function}/toggle', [App\Http\Controllers\BotFunctionController::class, 'toggle'])->name('functions.toggle');
+                    Route::get('/{function}/executions', [App\Http\Controllers\BotFunctionController::class, 'executions'])->name('functions.executions');
+                });
+
             });
             Route::prefix('bots/{bot}/knowledge')->middleware('bot.access')->group(function () {
                 Route::get('/sources', [KnowledgeSourceController::class, 'index'])->name('knowledge.sources.index');
@@ -332,18 +345,8 @@ Route::prefix('billing')->middleware(['auth'])->group(function () {
     Route::get('/payments', [BillingController::class, 'payments'])->name('billing.payments');
     Route::get('/payment/success', [BillingController::class, 'paymentSuccess'])->name('billing.payment.success');
 });
-Route::prefix('bots/{bot}/functions')->middleware('bot.access')->group(function () {
-    Route::get('/', [BotFunctionController::class, 'index'])->name('functions.index');
-    Route::get('/create', [BotFunctionController::class, 'create'])->name('functions.create');
-    Route::post('/', [BotFunctionController::class, 'store'])->name('functions.store');
-    Route::get('/{function}', [BotFunctionController::class, 'show'])->name('functions.show');
-    Route::get('/{function}/edit', [BotFunctionController::class, 'edit'])->name('functions.edit');
-    Route::put('/{function}', [BotFunctionController::class, 'update'])->name('functions.update');
-    Route::delete('/{function}', [BotFunctionController::class, 'destroy'])->name('functions.destroy');
-    Route::post('/{function}/test', [BotFunctionController::class, 'test'])->name('functions.test');
-    Route::post('/{function}/toggle', [BotFunctionController::class, 'toggle'])->name('functions.toggle');
-    Route::get('/{function}/executions', [BotFunctionController::class, 'executions'])->name('functions.executions');
-});
+
+
 // Webhook ЮКассы (без авторизации)
 Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
     ->name('yookassa.webhook')

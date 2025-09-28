@@ -27,7 +27,7 @@ class BotFunctionController extends Controller
     public function create(Organization $organization, Bot $bot)
     {
         // Получаем доступные CRM интеграции для выбора действий
-        $crmIntegrations = $bot->crmIntegrations()->where('is_active', true)->get();
+        $crmIntegrations = $bot->crmIntegrations()->where('crm_integrations.is_active', 1)->get();
         
         return view('functions.create', compact('organization', 'bot', 'crmIntegrations'));
     }

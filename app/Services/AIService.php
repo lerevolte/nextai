@@ -159,4 +159,82 @@ class AIService
 
         return $messages;
     }
+
+
+    /**
+     * Извлечь данные из текста используя AI
+     */
+    public function extractData(string $prompt): string
+    {
+        $provider = $this->getProvider('openai'); // или другой провайдер
+        
+        return $provider->generateResponse(
+            model: 'gpt-4o-mini',
+            messages: [
+                ['role' => 'system', 'content' => 'Ты помощник для извлечения структурированных данных. Всегда возвращай результат в формате JSON.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            temperature: 0.3,
+            maxTokens: 500
+        );
+    }
+
+    /**
+     * Классифицировать текст
+     */
+    public function classify(string $prompt): string
+    {
+        $provider = $this->getProvider('openai');
+        
+        return $provider->generateResponse(
+            model: 'gpt-4o-mini',
+            messages: [
+                ['role' => 'system', 'content' => 'Ты классификатор текста. Определяй намерения и возвращай результат в формате JSON.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            temperature: 0.3,
+            maxTokens: 200
+        );
+    }
+
+    /**
+     * Анализ тональности текста
+     */
+    public function analyzeSentiment(string $text): array
+    {
+        $provider = $this->getProvider('openai');
+        
+        $prompt = "Проанализируй тональность следующего текста и верни результат в формате JSON:\n";
+        $prompt .= "{\n";
+        $prompt .= '  "label": "positive|neutral|negative",\n';
+        $prompt .= '  "score": -1.0 до 1.0,\n';
+        $prompt .= '  "explanation": "краткое объяснение"\n';
+        $prompt .= "}\n\n";
+        $prompt .= "Текст: {$text}";
+        
+        $response = $provider->generateResponse(
+            model: 'gpt-4o-mini',
+            messages: [
+                ['role' => 'system', 'content' => 'Ты анализатор тональности текста.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            temperature: 0.3,
+            maxTokens: 200
+        );
+        
+        // Парсим JSON из ответа
+        if (preg_match('/\{.*\}/s', $response, $matches)) {
+            $data = json_decode($matches[0], true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $data;
+            }
+        }
+        
+        // Значение по умолчанию
+        return [
+            'label' => 'neutral',
+            'score' => 0,
+            'explanation' => 'Не удалось определить тональность'
+        ];
+    }
 }
