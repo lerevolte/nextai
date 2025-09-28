@@ -13,25 +13,17 @@ class GeminiProvider implements AIProviderInterface
 
     public function __construct()
     {
-        // 1. Собираем базовую конфигурацию для Guzzle
         $config = [
-            'timeout' => 30,
-            // Внимание: в продакшене 'verify' => false может быть небезопасно.
-            // Лучше установить сертификат или использовать 'verify' => '/path/to/cacert.pem'
+            'timeout' => 60, // Увеличим таймаут на всякий случай
             'verify' => false,
         ];
 
-        // 2. Получаем URL прокси из вашего конфигурационного файла
         $proxyUrl = config('chatbot.proxy_url');
-
-        // 3. Если URL прокси задан в конфигурации, добавляем его в настройки клиента
         if (!empty($proxyUrl)) {
             $config['proxy'] = $proxyUrl;
         }
 
-        // 4. Создаем Guzzle клиент с итоговой конфигурацией
         $this->client = new Client($config);
-        
         $this->apiKey = config('chatbot.ai_providers.gemini.api_key');
     }
 
@@ -42,72 +34,63 @@ class GeminiProvider implements AIProviderInterface
         int $maxTokens
     ): string {
         try {
-            // URL для Gemini API
             $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent";
             
-            // --- НАЧАЛО ИЗМЕНЕНИЙ: Склеиваем последовательные сообщения от пользователя ---
-            $cleanedMessages = [];
-            foreach ($messages as $message) {
-                if (isset($message['role']) && $message['role'] === 'user' && !empty($cleanedMessages) && end($cleanedMessages)['role'] === 'user') {
-                    $lastKey = array_key_last($cleanedMessages);
-                    $cleanedMessages[$lastKey]['content'] .= "\n" . $message['content'];
-                } else {
-                    $cleanedMessages[] = $message;
-                }
-            }
-            // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+            // --- НАЧАЛО НОВОЙ ЛОГИКИ ФОРМИРОВАНИЯ ЗАПРОСА ---
 
-            // Преобразуем формат сообщений для Gemini, используя очищенный массив
             $contents = [];
             $systemPrompt = '';
-            
-            foreach ($cleanedMessages as $message) { // Используем $cleanedMessages
+            $history = [];
+
+            // 1. Извлекаем системный промпт и отделяем его от истории сообщений
+            foreach ($messages as $message) {
                 if ($message['role'] === 'system') {
-                    // Gemini не имеет отдельной системной роли, добавляем в начало
-                    $systemPrompt = $message['content'] . "\n\n";
-                } elseif ($message['role'] === 'user') {
-                    // Добавляем системный промпт к первому сообщению пользователя
-                    $content = $systemPrompt ? $systemPrompt . $message['content'] : $message['content'];
-                    $contents[] = [
-                        'parts' => [
-                            ['text' => $content]
-                        ],
-                        'role' => 'user'
-                    ];
-                    $systemPrompt = ''; // Используем только один раз
-                } elseif ($message['role'] === 'assistant') {
-                    $contents[] = [
-                        'parts' => [
-                            ['text' => $message['content']]
-                        ],
-                        'role' => 'model'
-                    ];
+                    $systemPrompt = $message['content'];
+                } else {
+                    $history[] = $message;
                 }
             }
 
-            // Если contents пустой, добавляем хотя бы системный промпт
-            if (empty($contents) && $systemPrompt) {
-                $contents[] = [
-                    'parts' => [
-                        ['text' => $systemPrompt]
-                    ],
-                    'role' => 'user'
+            // 2. Добавляем системный промпт (персонажа) как первое сообщение от пользователя
+            if ($systemPrompt) {
+                 $contents[] = [
+                    'role' => 'user', 
+                    'parts' => [['text' => $systemPrompt]]
                 ];
             }
+           
+            // 3. "Внедряем" жесткое правило форматирования через пример
+            $formatting_rule = 'КРАЙНЕ ВАЖНОЕ ПРАВИЛО: В своем ответе ты НИКОГДА не используешь Markdown. ЗАПРЕЩЕНО использовать символы `*` и `**`. Форматируй списки только с новой строки, используя тире. Пример: "- Название букета - 500 руб."';
+            $contents[] = [
+                'role' => 'user', 
+                'parts' => [['text' => $formatting_rule]]
+            ];
+            // Добавляем "фейковый" ответ, где модель подтверждает правило
+            $contents[] = [
+                'role' => 'model', 
+                'parts' => [['text' => 'Правило понятны. Никакого Markdown, только простой текст с тире для списков.']]
+            ];
 
-            Log::info('Gemini API Request', [
+            // 4. Добавляем реальную историю диалога
+            foreach ($history as $message) {
+                $role = ($message['role'] === 'user') ? 'user' : 'model';
+                $contents[] = [
+                    'role' => $role,
+                    'parts' => [['text' => $message['content']]]
+                ];
+            }
+            
+            // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+
+            Log::info('Gemini API Request (Strict Formatting)', [
                 'url' => $url,
                 'model' => $model,
                 'contents' => $contents,
             ]);
 
             $response = $this->client->post($url, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'query' => [
-                    'key' => $this->apiKey,
-                ],
+                'headers' => [ 'Content-Type' => 'application/json' ],
+                'query' => [ 'key' => $this->apiKey ],
                 'json' => [
                     'contents' => $contents,
                     'generationConfig' => [
@@ -117,44 +100,34 @@ class GeminiProvider implements AIProviderInterface
                         'topP' => 0.95,
                     ],
                     'safetySettings' => [
-                        [
-                            'category' => 'HARM_CATEGORY_HARASSMENT',
-                            'threshold' => 'BLOCK_NONE'
-                        ],
-                        [
-                            'category' => 'HARM_CATEGORY_HATE_SPEECH',
-                            'threshold' => 'BLOCK_NONE'
-                        ],
-                        [
-                            'category' => 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                            'threshold' => 'BLOCK_NONE'
-                        ],
-                        [
-                            'category' => 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                            'threshold' => 'BLOCK_NONE'
-                        ]
+                        ['category' => 'HARM_CATEGORY_HARASSMENT', 'threshold' => 'BLOCK_NONE'],
+                        ['category' => 'HARM_CATEGORY_HATE_SPEECH', 'threshold' => 'BLOCK_NONE'],
+                        ['category' => 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold' => 'BLOCK_NONE'],
+                        ['category' => 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold' => 'BLOCK_NONE']
                     ]
                 ],
             ]);
 
             $data = json_decode($response->getBody()->getContents(), true);
             
-            Log::info('Gemini API Response', [
-                'response' => $data,
-            ]);
+            Log::info('Gemini API Response', ['response' => $data]);
             
-            // Проверяем наличие ответа
             if (isset($data['candidates'][0]['content']['parts'][0]['text'])) {
                 return $data['candidates'][0]['content']['parts'][0]['text'];
             }
             
-            // Если есть ошибка в ответе
             if (isset($data['error'])) {
                 Log::error('Gemini API Error', ['error' => $data['error']]);
-                return 'Извините, произошла ошибка при генерации ответа. Попробуйте еще раз.';
+                return 'Извините, произошла ошибка при генерации ответа.';
             }
             
-            return 'Извините, не удалось сгенерировать ответ. Попробуйте еще раз.';
+            // Обработка случая, когда ответ заблокирован по соображениям безопасности
+            if (isset($data['candidates'][0]['finishReason']) && $data['candidates'][0]['finishReason'] === 'SAFETY') {
+                Log::warning('Gemini response blocked due to safety settings.', ['response' => $data]);
+                return 'К сожалению, я не могу предоставить ответ на этот запрос.';
+            }
+
+            return 'Извините, не удалось сгенерировать ответ.';
             
         } catch (\Exception $e) {
             Log::error('Gemini Provider Error', [
@@ -162,22 +135,13 @@ class GeminiProvider implements AIProviderInterface
                 'trace' => $e->getTraceAsString(),
             ]);
             
-            // Возвращаем дружелюбное сообщение об ошибке
-            if (strpos($e->getMessage(), '400') !== false) {
-                return 'Извините, неверный запрос к AI. Проверьте настройки бота.';
-            } elseif (strpos($e->getMessage(), '403') !== false || strpos($e->getMessage(), '401') !== false) {
-                return 'Извините, проблема с доступом к AI сервису. Проверьте API ключ.';
-            } elseif (strpos($e->getMessage(), '429') !== false) {
-                return 'Извините, превышен лимит запросов. Попробуйте позже.';
-            }
-            
-            return 'Извините, временная проблема с AI сервисом. Попробуйте еще раз.';
+            return 'Извините, возникла техническая проблема с AI сервисом. Попробуйте еще раз.';
         }
     }
 
     public function countTokens(string $text): int
     {
-        // Приблизительный подсчет для Gemini (1 токен ≈ 4 символа)
+        // Приблизительный подсчет (1 токен ≈ 4 символа)
         return (int) (mb_strlen($text) / 4);
     }
 }

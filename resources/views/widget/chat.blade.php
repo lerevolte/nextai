@@ -1149,6 +1149,14 @@
         div.textContent = text;
         return div.innerHTML;
     }
+    function closeChat() {
+        const message = {
+            type: 'chatbot-close'
+        };
+        
+        window.parent.postMessage(message, '*');
+    }
+
 
     // --- ЗАПУСК ---
     document.addEventListener('DOMContentLoaded', initChat);
