@@ -18,6 +18,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\PerformanceController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\BotFunctionController;
+use App\Models\Bot;
 use Illuminate\Support\Facades\Route;
 
 // Публичные роуты
@@ -104,7 +105,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     });
 
-    
     // Боты
     Route::middleware(['organization.access'])->group(function () {
         Route::prefix('o/{organization:slug}')->group(function () {
@@ -167,6 +167,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::post('/', [App\Http\Controllers\CrmIntegrationController::class, 'store'])->name('crm.store');
                 Route::get('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'show'])->name('crm.show');
                 Route::get('/{integration}/edit', [App\Http\Controllers\CrmIntegrationController::class, 'edit'])->name('crm.edit');
+                Route::get('/{integration}/load-pipelines', [App\Http\Controllers\CrmIntegrationController::class, 'loadPipelines'])->name('crm.load-pipelines');
                 Route::put('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'update'])->name('crm.update');
                 Route::delete('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'destroy'])->name('crm.destroy');
                 Route::post('/{integration}/test', [App\Http\Controllers\CrmIntegrationController::class, 'test'])->name('crm.test');
@@ -346,7 +347,12 @@ Route::prefix('billing')->middleware(['auth'])->group(function () {
     Route::get('/payment/success', [BillingController::class, 'paymentSuccess'])->name('billing.payment.success');
 });
 
-
+Route::post('/webhook/{key}', [App\Http\Controllers\Api\WebhookController::class, 'handle'])
+    ->name('webhook.handle');
+Route::prefix('api/functions')->middleware(['auth:sanctum'])->group(function () {
+    Route::post('/test-triggers', [App\Http\Controllers\Api\FunctionTestController::class, 'testTriggers']);
+    Route::post('/test-execute', [App\Http\Controllers\Api\FunctionTestController::class, 'testExecute']);
+});
 // Webhook ЮКассы (без авторизации)
 Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
     ->name('yookassa.webhook')
@@ -359,7 +365,8 @@ Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
 //    return response('OK');
 // })->where('any', '.*')->withoutMiddleware(['web', 'csrf']);
  Route::get('/test', (function(){
-    $integration = \App\Models\CrmIntegration::find(9);
+    $integration = \App\Models\CrmIntegration::find(11);
+    dd($integration->settings);
     $botIntegration = $integration->bots()
             ->where('bot_id', 1)
             ->first();
@@ -380,6 +387,30 @@ Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
         Route::post('/message', [BotController::class, 'processMessage']);
         Route::get('/conversations', [ConversationController::class, 'apiIndex']);
         Route::get('/conversations/{conversation}/messages', [ConversationController::class, 'messages']);
+    });
+    Route::get('bots/{bot}/intents', function (Bot $bot) {
+        return response()->json([
+            'intents' => $bot->intents()->where('is_active', true)->get()
+        ]);
+    });
+
+    // CRM Fields API
+    Route::prefix('crm')->group(function () {
+        Route::get('/fields/{provider}/{entityType}', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getFields'])
+            ->name('api.crm.fields');
+            
+        Route::get('/{provider}/lead-statuses', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getLeadStatuses'])
+            ->name('api.crm.lead-statuses');
+            
+        Route::get('/{provider}/users', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getUsers'])
+            ->name('api.crm.users');
+            
+        Route::get('/{provider}/lead-sources', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getLeadSources'])
+            ->name('api.crm.lead-sources');
     });
 });
 Route::get('/test/bitrix24-events/{botId}', function($botId) {

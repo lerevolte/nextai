@@ -3,6 +3,99 @@
 @section('title', 'Создать функцию')
 
 @section('content')
+<style type="text/css">
+    .field-mapping-container {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin-top: 15px;
+    }
+
+    .field-mapping-item {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+        border: 1px solid #e5e7eb;
+        transition: all 0.2s;
+    }
+
+    .field-mapping-item:hover {
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .field-mapping-item label {
+        display: block;
+        font-size: 12px;
+        color: #6b7280;
+        margin-bottom: 4px;
+        font-weight: 500;
+    }
+
+    .field-mapping-item select,
+    .field-mapping-item input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+    }
+
+    .field-mapping-item select:focus,
+    .field-mapping-item input:focus {
+        outline: none;
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+
+    .btn-add-field {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .btn-add-field:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #6b7280;
+        font-size: 16px;
+    }
+
+    /* Анимация загрузки */
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+
+    .loading {
+        animation: pulse 1.5s infinite;
+    }
+
+    /* Подсказки для полей */
+    .field-hint {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-top: 2px;
+    }
+
+    .required-field::after {
+        content: " *";
+        color: #ef4444;
+        font-weight: bold;
+    }
+</style>
 <div class="bg-gray-100 min-h-screen">
     <div class="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         
@@ -271,41 +364,292 @@ function updateActionType(select, index) {
     typeSelect.dispatchEvent(new Event('change'));
 }
 
+
 function showActionConfig(provider, type, index) {
     const configDiv = document.getElementById(`actionConfig_${index}`);
-    configDiv.innerHTML = ''; // Clear previous config
-
+    
     if (provider === 'bitrix24' && type === 'create_lead') {
-        configDiv.innerHTML = `
-            <h5 class="text-md font-semibold text-gray-800 mb-2">Настройка полей лида</h5>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="${labelClasses}">Название лида</label>
-                    <input type="text" name="actions[${index}][config][title]" placeholder="Лид из чат-бота" class="${selectClasses}">
+        // Показываем загрузку
+        configDiv.innerHTML = '<div class="loading">⏳ Загрузка полей CRM...</div>';
+        
+        // Загружаем поля из CRM
+        loadCRMFields(provider, 'lead').then(fields => {
+            configDiv.innerHTML = `
+                <h5 style="margin-bottom: 15px; font-weight: 600;">Маппинг полей лида</h5>
+                
+                <div class="field-mapping-container" id="fieldMapping_${index}">
+                    <div class="field-mapping-list" id="fieldList_${index}">
+                        <!-- Здесь будут динамические поля -->
+                    </div>
+                    
+                    <button type="button" onclick="addFieldMapping(${index})" 
+                            class="btn-add-field" style="margin-top: 15px; padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 5px;">
+                        + Добавить поле
+                    </button>
                 </div>
-                 <div>
-                    <label class="${labelClasses}">Ответственный</label>
-                    <select name="actions[${index}][config][assigned_by_id]" class="${selectClasses}">
-                        <option value="1">Пользователь по умолчанию</option>
-                        <!-- TODO: Load users from CRM -->
-                    </select>
+                
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                    <h6 style="margin-bottom: 10px;">Дополнительные настройки</h6>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div>
+                            <label>Стадия лида</label>
+                            <select name="actions[${index}][config][status_id]" id="leadStatus_${index}">
+                                <option value="">Загрузка...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Ответственный</label>
+                            <select name="actions[${index}][config][assigned_by_id]" id="assignedUser_${index}">
+                                <option value="">Загрузка...</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="${labelClasses}">Имя клиента</label>
-                    <select name="actions[${index}][field_mapping][name]" class="parameter-select ${selectClasses}"></select>
-                </div>
-                <div>
-                    <label class="${labelClasses}">Email</label>
-                    <select name="actions[${index}][field_mapping][email]" class="parameter-select ${selectClasses}"></select>
-                </div>
-                <div>
-                    <label class="${labelClasses}">Телефон</label>
-                    <select name="actions[${index}][field_mapping][phone]" class="parameter-select ${selectClasses}"></select>
-                </div>
-            </div>`;
-        updateParameterSelects();
+            `;
+            
+            // Сохраняем поля для использования
+            window.crmFields = window.crmFields || {};
+            window.crmFields[index] = fields;
+            
+            // Загружаем статусы и пользователей
+            loadLeadStatuses(provider, index);
+            loadCRMUsers(provider, index);
+            
+            // Добавляем первое поле по умолчанию
+            addFieldMapping(index);
+        });
+    } else if (provider === 'bitrix24' && type === 'create_deal') {
+        // Аналогично для сделок
+        loadCRMFields(provider, 'deal').then(fields => {
+            // Похожая логика для сделок
+        });
     }
-    // TODO: Add other configs for webhook, email etc.
+}
+
+async function loadCRMFields(provider, entityType) {
+    try {
+        const response = await fetch(`/api/crm/fields/${provider}/${entityType}`, {
+            headers: {
+                'Authorization': 'Bearer ' + document.querySelector('meta[name="api-token"]').content,
+                'Accept': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load fields');
+        
+        const data = await response.json();
+        return data.fields;
+    } catch (error) {
+        console.error('Error loading CRM fields:', error);
+        return getDefaultFields(entityType);
+    }
+}
+
+// Функция добавления маппинга поля
+function addFieldMapping(actionIndex) {
+    const container = document.getElementById(`fieldList_${actionIndex}`);
+    const fields = window.crmFields[actionIndex] || getDefaultFields('lead');
+    const parameters = getAvailableParameters();
+    const mappingIndex = container.children.length;
+    
+    const mappingHtml = `
+        <div class="field-mapping-item" style="display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; background: #f9fafb; border-radius: 5px;">
+            <div style="flex: 1;">
+                <label style="font-size: 12px; color: #6b7280;">Поле CRM</label>
+                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][crm_field]" 
+                        onchange="updateFieldType(${actionIndex}, ${mappingIndex}, this.value)"
+                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="">Выберите поле</option>
+                    ${fields.map(field => `
+                        <option value="${field.code}" 
+                                data-type="${field.type}"
+                                data-required="${field.isRequired}">
+                            ${field.title} ${field.isRequired ? '*' : ''}
+                        </option>
+                    `).join('')}
+                </select>
+            </div>
+            
+            <div style="flex: 1;">
+                <label style="font-size: 12px; color: #6b7280;">Источник данных</label>
+                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][source_type]" 
+                        onchange="toggleValueInput(${actionIndex}, ${mappingIndex}, this.value)"
+                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="parameter">Из параметра функции</option>
+                    <option value="static">Статичное значение</option>
+                    <option value="dynamic">Динамическое значение</option>
+                    <option value="conversation">Из диалога</option>
+                </select>
+            </div>
+            
+            <div style="flex: 1;" id="valueInput_${actionIndex}_${mappingIndex}">
+                <label style="font-size: 12px; color: #6b7280;">Значение</label>
+                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]" 
+                        class="parameter-select"
+                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="">Выберите параметр</option>
+                    ${parameters.map(param => `
+                        <option value="{${param.code}}">${param.name} (${param.code})</option>
+                    `).join('')}
+                </select>
+            </div>
+            
+            <div style="padding-top: 20px;">
+                <button type="button" onclick="removeFieldMapping(this)" 
+                        style="padding: 8px; color: #ef4444; background: white; border: 1px solid #ef4444; border-radius: 4px;">
+                    ✕
+                </button>
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', mappingHtml);
+}
+
+// Функция переключения типа значения
+function toggleValueInput(actionIndex, mappingIndex, sourceType) {
+    const valueDiv = document.getElementById(`valueInput_${actionIndex}_${mappingIndex}`);
+    const parameters = getAvailableParameters();
+    
+    switch(sourceType) {
+        case 'static':
+            valueDiv.innerHTML = `
+                <label style="font-size: 12px; color: #6b7280;">Значение</label>
+                <input type="text" 
+                       name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                       placeholder="Введите значение"
+                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+            `;
+            break;
+            
+        case 'parameter':
+            valueDiv.innerHTML = `
+                <label style="font-size: 12px; color: #6b7280;">Параметр</label>
+                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="">Выберите параметр</option>
+                    ${parameters.map(param => `
+                        <option value="{${param.code}}">${param.name} (${param.code})</option>
+                    `).join('')}
+                </select>
+            `;
+            break;
+            
+        case 'dynamic':
+            valueDiv.innerHTML = `
+                <label style="font-size: 12px; color: #6b7280;">Выражение</label>
+                <input type="text" 
+                       name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                       placeholder="Например: Заказ от {current_date}"
+                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+            `;
+            break;
+            
+        case 'conversation':
+            valueDiv.innerHTML = `
+                <label style="font-size: 12px; color: #6b7280;">Данные из диалога</label>
+                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="{conversation.id}">ID диалога</option>
+                    <option value="{conversation.user_name}">Имя пользователя</option>
+                    <option value="{conversation.user_email}">Email пользователя</option>
+                    <option value="{conversation.user_phone}">Телефон пользователя</option>
+                    <option value="{conversation.messages_count}">Количество сообщений</option>
+                    <option value="{conversation.channel}">Канал</option>
+                    <option value="{conversation.created_at}">Дата создания</option>
+                </select>
+            `;
+            break;
+    }
+}
+// Удаление маппинга поля
+function removeFieldMapping(button) {
+    button.closest('.field-mapping-item').remove();
+}
+
+// Получение доступных параметров
+function getAvailableParameters() {
+    const parameters = [];
+    document.querySelectorAll('[name^="parameters["][name*="[code]"]').forEach(input => {
+        if (input.value) {
+            const index = input.name.match(/\[(\d+)\]/)[1];
+            const nameInput = document.querySelector(`[name="parameters[${index}][name]"]`);
+            parameters.push({
+                code: input.value,
+                name: nameInput ? nameInput.value : input.value
+            });
+        }
+    });
+    return parameters;
+}
+
+// Загрузка статусов лидов
+async function loadLeadStatuses(provider, index) {
+    try {
+        const response = await fetch(`/api/crm/${provider}/lead-statuses`, {
+            headers: {
+                'Authorization': 'Bearer ' + document.querySelector('meta[name="api-token"]').content,
+                'Accept': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        const select = document.getElementById(`leadStatus_${index}`);
+        
+        select.innerHTML = '<option value="">По умолчанию</option>';
+        data.statuses.forEach(status => {
+            select.innerHTML += `<option value="${status.STATUS_ID}">${status.NAME}</option>`;
+        });
+    } catch (error) {
+        console.error('Error loading statuses:', error);
+    }
+}
+
+// Загрузка пользователей CRM
+async function loadCRMUsers(provider, index) {
+    try {
+        const response = await fetch(`/api/crm/${provider}/users`, {
+            headers: {
+                'Authorization': 'Bearer ' + document.querySelector('meta[name="api-token"]').content,
+                'Accept': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        const select = document.getElementById(`assignedUser_${index}`);
+        
+        select.innerHTML = '<option value="">По умолчанию</option>';
+        data.users.forEach(user => {
+            select.innerHTML += `<option value="${user.ID}">${user.NAME} ${user.LAST_NAME}</option>`;
+        });
+    } catch (error) {
+        console.error('Error loading users:', error);
+    }
+}
+
+// Поля по умолчанию если не удалось загрузить
+function getDefaultFields(entityType) {
+    if (entityType === 'lead') {
+        return [
+            { code: 'TITLE', title: 'Название', type: 'string', isRequired: true },
+            { code: 'NAME', title: 'Имя', type: 'string', isRequired: false },
+            { code: 'LAST_NAME', title: 'Фамилия', type: 'string', isRequired: false },
+            { code: 'SECOND_NAME', title: 'Отчество', type: 'string', isRequired: false },
+            { code: 'PHONE', title: 'Телефон', type: 'phone', isRequired: false, isMultiple: true },
+            { code: 'EMAIL', title: 'Email', type: 'email', isRequired: false, isMultiple: true },
+            { code: 'COMMENTS', title: 'Комментарий', type: 'text', isRequired: false },
+            { code: 'SOURCE_ID', title: 'Источник', type: 'select', isRequired: false },
+            { code: 'SOURCE_DESCRIPTION', title: 'Дополнительно об источнике', type: 'string', isRequired: false },
+            { code: 'STATUS_ID', title: 'Стадия', type: 'select', isRequired: false },
+            { code: 'ASSIGNED_BY_ID', title: 'Ответственный', type: 'user', isRequired: false },
+            { code: 'COMPANY_TITLE', title: 'Компания', type: 'string', isRequired: false },
+            { code: 'POST', title: 'Должность', type: 'string', isRequired: false },
+            { code: 'ADDRESS', title: 'Адрес', type: 'string', isRequired: false },
+            { code: 'OPPORTUNITY', title: 'Сумма', type: 'money', isRequired: false },
+            { code: 'CURRENCY_ID', title: 'Валюта', type: 'select', isRequired: false }
+        ];
+    }
+    return [];
 }
 
 function updateParameterSelects() {

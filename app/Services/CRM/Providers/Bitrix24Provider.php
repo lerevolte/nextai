@@ -1596,4 +1596,97 @@ class Bitrix24Provider implements CrmProviderInterface
         
         return $results;
     }
+
+
+    /**
+     * Создать лид с динамическим маппингом полей
+     */
+    public function createLeadFromFieldMapping(array $fieldData): array
+    {
+        try {
+            // Валидация обязательных полей
+            if (empty($fieldData['TITLE'])) {
+                $fieldData['TITLE'] = 'Лид из чат-бота #' . uniqid();
+            }
+            
+            Log::info('Creating Bitrix24 lead', [
+                'fields' => $fieldData
+            ]);
+            
+            $response = $this->makeRequest('crm.lead.add', [
+                'fields' => $fieldData,
+                'params' => ['REGISTER_SONET_EVENT' => 'Y']
+            ]);
+            
+            if (!empty($response['result'])) {
+                Log::info('Lead created successfully', [
+                    'lead_id' => $response['result']
+                ]);
+                
+                // Логируем в CRM
+                $this->integration->logSync(
+                    'outgoing',
+                    'lead',
+                    'create',
+                    $fieldData,
+                    $response,
+                    'success'
+                );
+            }
+            
+            return $response;
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to create lead in Bitrix24', [
+                'error' => $e->getMessage(),
+                'field_data' => $fieldData
+            ]);
+            
+            $this->integration->logSync(
+                'outgoing',
+                'lead',
+                'create',
+                $fieldData,
+                [],
+                'error',
+                $e->getMessage()
+            );
+            
+            throw $e;
+        }
+    }
+
+    /**
+     * Получить статусы лидов
+     */
+    public function getLeadStatuses(): array
+    {
+        try {
+            $response = $this->makeRequest('crm.status.list', [
+                'filter' => ['ENTITY_ID' => 'STATUS']
+            ]);
+            
+            return $response['result'] ?? [];
+        } catch (\Exception $e) {
+            Log::error('Failed to get lead statuses', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Получить источники лидов
+     */
+    public function getLeadSources(): array
+    {
+        try {
+            $response = $this->makeRequest('crm.status.list', [
+                'filter' => ['ENTITY_ID' => 'SOURCE']
+            ]);
+            
+            return $response['result'] ?? [];
+        } catch (\Exception $e) {
+            Log::error('Failed to get lead sources', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

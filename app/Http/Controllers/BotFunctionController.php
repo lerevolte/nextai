@@ -53,7 +53,11 @@ class BotFunctionController extends Controller
             'actions' => 'required|array|min:1',
             'actions.*.type' => 'required|string',
             'actions.*.provider' => 'required|string',
-            'actions.*.config' => 'required|array',
+            'actions.*.config' => 'nullable|array',
+            'actions.*.field_mapping' => 'nullable|array',
+            'actions.*.field_mapping.*.crm_field' => 'nullable|string',
+            'actions.*.field_mapping.*.source_type' => 'nullable|string',
+            'actions.*.field_mapping.*.value' => 'nullable|string',
             
             // Поведение
             'behavior.on_success' => 'required|in:continue,pause,enhance_prompt',
@@ -90,13 +94,27 @@ class BotFunctionController extends Controller
                 }
             }
             
-            // Создаем действия
+            // Создаем действия с маппингом полей
             foreach ($validated['actions'] as $index => $actionData) {
+                // Очищаем пустые маппинги
+                $fieldMapping = [];
+                if (!empty($actionData['field_mapping'])) {
+                    foreach ($actionData['field_mapping'] as $mapping) {
+                        if (!empty($mapping['crm_field'])) {
+                            $fieldMapping[] = [
+                                'crm_field' => $mapping['crm_field'],
+                                'source_type' => $mapping['source_type'] ?? 'static',
+                                'value' => $mapping['value'] ?? ''
+                            ];
+                        }
+                    }
+                }
+                
                 $function->actions()->create([
                     'type' => $actionData['type'],
                     'provider' => $actionData['provider'],
-                    'config' => $actionData['config'],
-                    'field_mapping' => $actionData['field_mapping'] ?? [],
+                    'config' => $actionData['config'] ?? [],
+                    'field_mapping' => $fieldMapping,
                     'position' => $index,
                 ]);
             }

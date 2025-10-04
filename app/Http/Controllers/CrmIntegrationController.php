@@ -61,6 +61,22 @@ class CrmIntegrationController extends Controller
             'bot_ids.*' => 'exists:bots,id',
         ]);
 
+        // Дополнительная валидация для AmoCRM
+        if ($validated['type'] === 'amocrm') {
+            $request->validate([
+                'settings.default_pipeline_id' => 'required|integer',
+                'settings.default_status_id' => 'required|integer',
+                'credentials.subdomain' => 'required|string',
+                'credentials.client_id' => 'required|string',
+                'credentials.client_secret' => 'required|string',
+                'credentials.access_token' => 'required|string',
+                'credentials.refresh_token' => 'required|string',
+            ], [
+                'settings.default_pipeline_id.required' => 'ID воронки обязателен для AmoCRM',
+                'settings.default_status_id.required' => 'ID начального этапа обязателен для AmoCRM',
+            ]);
+        }
+
         // Проверяем, нет ли уже интеграции этого типа
         if ($organization->crmIntegrations()->where('type', $validated['type'])->exists()) {
             return back()->withErrors(['type' => 'Интеграция этого типа уже существует']);
@@ -124,6 +140,48 @@ class CrmIntegrationController extends Controller
             return back()
                 ->withInput()
                 ->withErrors(['error' => 'Ошибка при создании интеграции: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Загрузка воронок и этапов из AmoCRM
+     */
+    public function loadPipelines(Organization $organization, CrmIntegration $integration)
+    {
+        if ($integration->organization_id !== $organization->id) {
+            abort(403);
+        }
+
+        if ($integration->type !== 'amocrm') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Эта функция доступна только для AmoCRM'
+            ], 400);
+        }
+
+        try {
+            $provider = $this->crmService->getProvider($integration);
+            $pipelines = $provider->getPipelines();
+            
+            $formatted = [];
+            foreach ($pipelines as $pipeline) {
+                $stages = $provider->getPipelineStages($pipeline['id']);
+                $formatted[] = [
+                    'id' => $pipeline['id'],
+                    'name' => $pipeline['name'],
+                    'stages' => $stages
+                ];
+            }
+            
+            return response()->json([
+                'success' => true,
+                'pipelines' => $formatted,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 500);
         }
     }
 

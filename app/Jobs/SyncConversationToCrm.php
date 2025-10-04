@@ -46,6 +46,12 @@ class SyncConversationToCrm implements ShouldQueue
      */
     public function handle(CrmService $crmService): void
     {
+        Log::info('🚀 SyncConversationToCrm Job started', [
+            'conversation_id' => $this->conversation->id,
+            'bot_id' => $this->conversation->bot_id,
+            'action' => $this->action,
+            'has_integration' => $this->integration ? 'yes' : 'no'
+        ]);
         if ($this->action === 'create_lead' && $this->conversation->crm_lead_id) {
             Log::info('Lead already exists, skipping sync', [
                 'conversation_id' => $this->conversation->id,

@@ -53,7 +53,7 @@ class ConversationObserver
                 // Для других CRM - стандартная синхронизация
                 Log::info("Dispatching SyncConversationToCrm for {$integration->type}");
                 SyncConversationToCrm::dispatch($conversation, $integration, 'create_lead')
-                    ->delay(now()->addSeconds(10));
+                    ->delay(now()->addSeconds(10))->onQueue('high_priority');
             }
         }
     }
@@ -126,30 +126,98 @@ class ConversationObserver
 
     public function updated(Conversation $conversation): void
     {
-        // Обновляем данные только если изменились контакты и лид еще не создан
-        if (($conversation->isDirty('user_name') || 
-             $conversation->isDirty('user_email') || 
-             $conversation->isDirty('user_phone')) &&
-            !$conversation->crm_lead_id) {
+        // Пропускаем если обновляется только metadata или crm поля
+        if ($conversation->wasChanged(['metadata', 'crm_lead_id', 'crm_deal_id', 'crm_contact_id'])) {
+            Log::debug('Conversation metadata updated, skipping sync trigger');
+            return;
+        }
+
+        // Проверяем блокировку на уровне observer
+        $lockKey = "conversation_update_sync_{$conversation->id}";
+        
+        if (Cache::has($lockKey)) {
+            Log::info('Update sync already triggered, skipping', [
+                'conversation_id' => $conversation->id
+            ]);
+            return;
+        }
+        
+        // Устанавливаем блокировку на 60 секунд
+        Cache::put($lockKey, true, 60);
+        
+        Log::info('Conversation updated', ['conversation_id' => $conversation->id]);
+        
+        // Синхронизируем только если нет лида и данные пользователя заполнены
+        if (!$conversation->crm_lead_id/* && 
+            !empty($conversation->user_name) && 
+            $conversation->user_name !== 'Гость'*/) {
             
             Log::info('Conversation user data updated, checking for sync');
             
-            if (!empty($conversation->user_name) && $conversation->user_name !== 'Гость') {
-                $activeIntegrations = $conversation->bot->crmIntegrations()
-                    ->wherePivot('is_active', true)
-                    ->wherePivot('sync_conversations', true)
-                    ->get();
-
-                foreach ($activeIntegrations as $integration) {
-                    if ($integration->type === 'bitrix24') {
-                        $this->handleBitrix24Integration($conversation, $integration);
-                    } else {
-                        SyncConversationToCrm::dispatch($conversation, $integration, 'sync');
-                    }
+            $activeIntegrations = $conversation->bot->crmIntegrations()
+                ->wherePivot('is_active', true)
+                ->wherePivot('sync_conversations', true)
+                ->get();
+                
+            if ($activeIntegrations->isEmpty()) {
+                Cache::forget($lockKey);
+                return;
+            }
+            
+            foreach ($activeIntegrations as $integration) {
+                // Проверяем, не была ли уже запущена синхронизация для этой интеграции
+                $integrationLockKey = "conversation_sync_{$conversation->id}_{$integration->id}";
+                
+                if (Cache::has($integrationLockKey)) {
+                    Log::info('Sync already triggered for this integration', [
+                        'conversation_id' => $conversation->id,
+                        'integration_id' => $integration->id
+                    ]);
+                    continue;
+                }
+                
+                Cache::put($integrationLockKey, true, 120);
+                
+                if ($integration->type === 'bitrix24') {
+                    $this->handleBitrix24Integration($conversation, $integration);
+                } else {
+                    Log::info("Dispatching SyncConversationToCrm for {$integration->type}");
+                    SyncConversationToCrm::dispatch($conversation, $integration, 'sync')
+                        ->delay(now()->addSeconds(10))
+                        ->onQueue('high_priority');
                 }
             }
         }
     }
+
+    // public function updated(Conversation $conversation): void
+    // {
+    //     // Обновляем данные только если изменились контакты и лид еще не создан
+    //     // if (($conversation->isDirty('user_name') || 
+    //     //      $conversation->isDirty('user_email') || 
+    //     //      $conversation->isDirty('user_phone')) &&
+    //     //     !$conversation->crm_lead_id) {
+    //     info('Conversation updated');
+    //     if (!$conversation->crm_lead_id) {
+    //         Log::info('Conversation user data updated, checking for sync');
+            
+    //         if (!empty($conversation->user_name) && $conversation->user_name !== 'Гость') {
+    //             $activeIntegrations = $conversation->bot->crmIntegrations()
+    //                 ->wherePivot('is_active', true)
+    //                 ->wherePivot('sync_conversations', true)
+    //                 ->get();
+
+    //             foreach ($activeIntegrations as $integration) {
+    //                 if ($integration->type === 'bitrix24') {
+    //                     $this->handleBitrix24Integration($conversation, $integration);
+    //                 } else {
+    //                     Log::info("Dispatching SyncConversationToCrm for {$integration->type}");
+    //                     SyncConversationToCrm::dispatch($conversation, $integration, 'sync')->delay(now()->addSeconds(10))->onQueue('high_priority');
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     public function deleting(Conversation $conversation): void
     {

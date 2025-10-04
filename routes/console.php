@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 
-Schedule::command('knowledge:sync')->hourly();
+//Schedule::command('knowledge:sync')->hourly();
 // Экспорт незавершенных диалогов в CRM каждые 30 минут
 Schedule::command('crm:sync export --limit=50')
     ->everyThirtyMinutes()
@@ -19,3 +19,7 @@ Schedule::command('crm:sync export --limit=50')
 Schedule::command('crm:sync stats')
     ->dailyAt('09:00')
     ->emailOutputTo(config('mail.admin_email'));
+Schedule::command('functions:run-scheduled')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground();

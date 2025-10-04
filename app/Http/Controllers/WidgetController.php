@@ -68,12 +68,12 @@ class WidgetController extends Controller
                 ->where('status', 'active') // Только активные диалоги
                 ->first();
                 
-            Log::info('Looking for existing conversation', [
-                'session_id' => $sessionId,
-                'bot_id' => $bot->id,
-                'channel_id' => $channel->id,
-                'found' => $conversation ? true : false
-            ]);
+            // Log::info('Looking for existing conversation', [
+            //     'session_id' => $sessionId,
+            //     'bot_id' => $bot->id,
+            //     'channel_id' => $channel->id,
+            //     'found' => $conversation ? true : false
+            // ]);
         }
 
         // Если диалог не найден, создаем новый
@@ -83,11 +83,11 @@ class WidgetController extends Controller
                 $sessionId = Str::uuid()->toString();
             }
             
-            Log::info('Creating new conversation', [
-                'session_id' => $sessionId,
-                'bot_id' => $bot->id,
-                'user_info' => $userInfo
-            ]);
+            // Log::info('Creating new conversation', [
+            //     'session_id' => $sessionId,
+            //     'bot_id' => $bot->id,
+            //     'user_info' => $userInfo
+            // ]);
             
             $conversation = Conversation::create([
                 'bot_id' => $bot->id,
@@ -133,10 +133,10 @@ class WidgetController extends Controller
                 $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
                 $conversation->update($updateData);
                 
-                Log::info('Updated conversation user data', [
-                    'conversation_id' => $conversation->id,
-                    'updates' => $updateData
-                ]);
+                // Log::info('Updated conversation user data', [
+                //     'conversation_id' => $conversation->id,
+                //     'updates' => $updateData
+                // ]);
             }
         }
 
@@ -228,9 +228,9 @@ class WidgetController extends Controller
             // 2. Запускаем создание чата в Битрикс24 ТОЛЬКО ОДИН РАЗ
             // Если диалог еще не был синхронизирован, запускаем обработчик
             if (!$wasAlreadySynced) {
-                Log::info("First user message in unsynced conversation {$conversation->id}. Triggering CRM sync.", [
-                    'message_id' => $userMessage->id
-                ]);
+                // Log::info("First user message in unsynced conversation {$conversation->id}. Triggering CRM sync.", [
+                //     'message_id' => $userMessage->id
+                // ]);
                 // Этот вызов создаст чат в Битрикс24 и сохранит нужные ID в metadata диалога
                 (new \App\Observers\ConversationObserver())->created($conversation);
             }
@@ -307,10 +307,10 @@ class WidgetController extends Controller
                 'closed_at' => now(),
             ]);
             
-            Log::info('Conversation ended via widget', [
-                'conversation_id' => $conversation->id,
-                'session_id' => $request->session_id
-            ]);
+            // Log::info('Conversation ended via widget', [
+            //     'conversation_id' => $conversation->id,
+            //     'session_id' => $request->session_id
+            // ]);
         }
 
         return response()->json(['success' => true]);
@@ -325,10 +325,10 @@ class WidgetController extends Controller
 
         $lastMessageId = $request->input('last_message_id', 0);
 
-        Log::info('[WidgetController] Poll request received', [
-            'bot_id' => $bot->id,
-            'polling_after_message_id' => $lastMessageId
-        ]);
+        // Log::info('[WidgetController] Poll request received', [
+        //     'bot_id' => $bot->id,
+        //     'polling_after_message_id' => $lastMessageId
+        // ]);
         
         $conversation = Conversation::where('external_id', $request->session_id)
             ->where('bot_id', $bot->id)
@@ -353,10 +353,10 @@ class WidgetController extends Controller
                 ];
             });
         
-        Log::info('[WidgetController] Poll response sending', [
-            'conversation_id' => $conversation->id,
-            'messages_found' => $messages->count()
-        ]);
+        // Log::info('[WidgetController] Poll response sending', [
+        //     'conversation_id' => $conversation->id,
+        //     'messages_found' => $messages->count()
+        // ]);
         
         return response()->json([
             'messages' => $messages,

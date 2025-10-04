@@ -120,6 +120,9 @@
                         <label class="block text-sm font-medium text-gray-700 mb-2">Access Token</label>
                         <input type="password" name="credentials[access_token]" 
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <p class="mt-1 text-xs text-gray-500">
+                            Получите токен через OAuth2 авторизацию в AmoCRM
+                        </p>
                     </div>
 
                     <div class="mb-4">
@@ -132,7 +135,92 @@
                         <label class="block text-sm font-medium text-gray-700 mb-2">Redirect URI</label>
                         <input type="text" name="credentials[redirect_uri]" 
                                value="{{ old('credentials.redirect_uri', url('/webhooks/crm/amocrm')) }}"
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                               readonly>
+                    </div>
+
+                    <div class="border-t border-gray-200 my-6 pt-6">
+                        <h4 class="text-md font-medium text-gray-900 mb-4">Настройки воронки и этапов</h4>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                ID воронки (Pipeline ID) <span class="text-red-500">*</span>
+                            </label>
+                            <input type="number" name="settings[default_pipeline_id]" 
+                                   value="{{ old('settings.default_pipeline_id') }}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                   placeholder="7654321"
+                                   required>
+                            <p class="mt-1 text-xs text-gray-500">
+                                Обязательное поле. ID воронки, в которую будут попадать лиды
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                ID начального этапа (Status ID) <span class="text-red-500">*</span>
+                            </label>
+                            <input type="number" name="settings[default_status_id]" 
+                                   value="{{ old('settings.default_status_id') }}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                   placeholder="142"
+                                   required>
+                            <p class="mt-1 text-xs text-gray-500">
+                                Обязательное поле. ID этапа, на котором создаются новые лиды
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                ID ответственного (User ID)
+                            </label>
+                            <input type="number" name="settings[default_responsible_id]" 
+                                   value="{{ old('settings.default_responsible_id', 1) }}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                   placeholder="1">
+                            <p class="mt-1 text-xs text-gray-500">
+                                ID пользователя, который будет ответственным за новые лиды
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                ID этапа "Завершено"
+                            </label>
+                            <input type="number" name="settings[completed_status_id]" 
+                                   value="{{ old('settings.completed_status_id') }}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                   placeholder="143">
+                            <p class="mt-1 text-xs text-gray-500">
+                                ID этапа для завершенных диалогов (опционально)
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                ID этапа "В работе"
+                            </label>
+                            <input type="number" name="settings[active_status_id]" 
+                                   value="{{ old('settings.active_status_id') }}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                   placeholder="142">
+                            <p class="mt-1 text-xs text-gray-500">
+                                ID этапа для активных диалогов (опционально)
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-blue-50 rounded-lg">
+                        <p class="text-sm font-medium text-blue-900 mb-2">💡 Как получить ID воронки и этапов?</p>
+                        <ol class="text-xs text-blue-700 space-y-1 list-decimal list-inside">
+                            <li>Зайдите в AmoCRM → Настройки → Воронки и статусы</li>
+                            <li>Откройте нужную воронку</li>
+                            <li>ID воронки будет в URL: <code>/leads/pipelines/<b>7654321</b></code></li>
+                            <li>ID этапов можно получить через API или консоль разработчика</li>
+                        </ol>
+                        <p class="mt-2 text-xs text-blue-700">
+                            Или используйте команду: <code class="bg-white px-1 py-0.5 rounded">php artisan crm:get-pipelines {integration_id}</code>
+                        </p>
                     </div>
                 </div>
 
@@ -294,6 +382,41 @@ function showCredentialsForm(type) {
             icon.classList.add('hidden');
         }
     });
+}
+function loadPipelines(integrationId) {
+    const button = event.target;
+    button.disabled = true;
+    button.textContent = 'Загрузка...';
+    
+    fetch(`/o/{{ $organization->slug }}/crm/${integrationId}/load-pipelines`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                let html = '<div class="mt-3 space-y-2">';
+                data.pipelines.forEach(pipeline => {
+                    html += `<div class="p-3 bg-white rounded border">`;
+                    html += `<p class="font-medium">Воронка: ${pipeline.name} (ID: ${pipeline.id})</p>`;
+                    html += `<div class="mt-2 text-xs space-y-1">`;
+                    pipeline.stages.forEach(stage => {
+                        html += `<div>• ${stage.name} (ID: ${stage.id})</div>`;
+                    });
+                    html += `</div></div>`;
+                });
+                html += '</div>';
+                
+                button.insertAdjacentHTML('afterend', html);
+                button.remove();
+            } else {
+                alert('Ошибка: ' + data.error);
+                button.disabled = false;
+                button.textContent = 'Загрузить из AmoCRM';
+            }
+        })
+        .catch(error => {
+            alert('Ошибка загрузки: ' + error);
+            button.disabled = false;
+            button.textContent = 'Загрузить из AmoCRM';
+        });
 }
 
 // При загрузке страницы показываем форму если тип уже выбран

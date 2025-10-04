@@ -82,15 +82,112 @@
                         
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Поддомен</label>
-                            <input type="text" name="credentials[subdomain]" 
-                                   value="{{ old('credentials.subdomain', $integration->credentials['subdomain'] ?? '') }}"
-                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                                   placeholder="yourcompany">
+                            <div class="flex">
+                                <input type="text" name="credentials[subdomain]" 
+                                       value="{{ old('credentials.subdomain', $integration->credentials['subdomain'] ?? '') }}"
+                                       class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg"
+                                       placeholder="yourcompany">
+                                <span class="px-3 py-2 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg">
+                                    .amocrm.ru
+                                </span>
+                            </div>
                         </div>
-                        
-                        <p class="text-sm text-gray-500">
-                            Для обновления токенов обратитесь к администратору
-                        </p>
+
+                        <div class="border-t border-gray-200 my-4 pt-4">
+                            <h4 class="text-md font-medium text-gray-900 mb-4">Настройки воронки и этапов</h4>
+                            
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID воронки (Pipeline ID) <span class="text-red-500">*</span>
+                                </label>
+                                <input type="number" name="settings[default_pipeline_id]" 
+                                       value="{{ old('settings.default_pipeline_id', $integration->settings['default_pipeline_id'] ?? '') }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="7654321"
+                                       required>
+                                <p class="mt-1 text-xs text-gray-500">
+                                    Обязательное поле. ID воронки, в которую будут попадать лиды
+                                </p>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID начального этапа (Status ID) <span class="text-red-500">*</span>
+                                </label>
+                                <input type="number" name="settings[default_status_id]" 
+                                       value="{{ old('settings.default_status_id', $integration->settings['default_status_id'] ?? '') }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="142"
+                                       required>
+                                <p class="mt-1 text-xs text-gray-500">
+                                    Обязательное поле. ID этапа, на котором создаются новые лиды
+                                </p>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID ответственного (User ID)
+                                </label>
+                                <input type="number" name="settings[default_responsible_id]" 
+                                       value="{{ old('settings.default_responsible_id', $integration->settings['default_responsible_id'] ?? 1) }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="1">
+                                <p class="mt-1 text-xs text-gray-500">
+                                    ID пользователя, который будет ответственным за новые лиды
+                                </p>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID этапа "Завершено"
+                                </label>
+                                <input type="number" name="settings[completed_status_id]" 
+                                       value="{{ old('settings.completed_status_id', $integration->settings['completed_status_id'] ?? '') }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="143">
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID этапа "В работе"
+                                </label>
+                                <input type="number" name="settings[active_status_id]" 
+                                       value="{{ old('settings.active_status_id', $integration->settings['active_status_id'] ?? '') }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="142">
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    ID этапа "Ожидание"
+                                </label>
+                                <input type="number" name="settings[pending_status_id]" 
+                                       value="{{ old('settings.pending_status_id', $integration->settings['pending_status_id'] ?? '') }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                       placeholder="144">
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                            <div>
+                                <p class="text-sm font-medium text-yellow-900">Токены</p>
+                                <p class="text-xs text-yellow-700">Токены обновляются автоматически</p>
+                            </div>
+                            <button type="button" 
+                                    onclick="refreshTokens({{ $integration->id }})"
+                                    class="px-3 py-1 text-xs bg-yellow-600 text-white rounded hover:bg-yellow-700">
+                                Обновить токены
+                            </button>
+                        </div>
+
+                        <div class="mt-4 p-4 bg-blue-50 rounded-lg">
+                            <p class="text-sm font-medium text-blue-900 mb-2">🔧 Получить ID воронок и этапов</p>
+                            <button type="button" 
+                                    onclick="loadPipelines({{ $integration->id }})"
+                                    class="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                                Загрузить из AmoCRM
+                            </button>
+                        </div>
                     </div>
 
                 @elseif($integration->type == 'salebot')
@@ -166,3 +263,42 @@
     </div>
 </div>
 @endsection
+@push('scripts')
+<script>
+function loadPipelines(integrationId) {
+    const button = event.target;
+    button.disabled = true;
+    button.textContent = 'Загрузка...';
+    
+    fetch(`/o/{{ $organization->slug }}/crm/${integrationId}/load-pipelines`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                let html = '<div class="mt-3 space-y-2">';
+                data.pipelines.forEach(pipeline => {
+                    html += `<div class="p-3 bg-white rounded border">`;
+                    html += `<p class="font-medium">Воронка: ${pipeline.name} (ID: ${pipeline.id})</p>`;
+                    html += `<div class="mt-2 text-xs space-y-1">`;
+                    pipeline.stages.forEach(stage => {
+                        html += `<div>• ${stage.name} (ID: ${stage.id})</div>`;
+                    });
+                    html += `</div></div>`;
+                });
+                html += '</div>';
+                
+                button.insertAdjacentHTML('afterend', html);
+                button.remove();
+            } else {
+                alert('Ошибка: ' + data.error);
+                button.disabled = false;
+                button.textContent = 'Загрузить из AmoCRM';
+            }
+        })
+        .catch(error => {
+            alert('Ошибка загрузки: ' + error);
+            button.disabled = false;
+            button.textContent = 'Загрузить из AmoCRM';
+        });
+}
+</script>
+@endpush
