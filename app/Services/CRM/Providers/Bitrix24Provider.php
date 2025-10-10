@@ -25,22 +25,18 @@ class Bitrix24Provider implements CrmProviderInterface
         $this->integration = $integration;
         $this->client = new Client([
             'timeout' => 30,
-            'verify' => false, // В продакшене лучше использовать true
+            'verify' => false,
         ]);
         
         $this->config = $integration->credentials ?? [];
 
-        // --- ИСПРАВЛЕНИЕ: Используем два отдельных if вместо if/elseif ---
-        // Это позволяет корректно обрабатывать случай, когда установленное приложение
-        // имеет и webhook (для событий), и OAuth-токены (для API-запросов).
-
-        // 1. Инициализируем вебхук, если он есть
-        if (isset($this->config['webhook_url'])) {
+        // 1. Инициализируем вебхук, если он есть И не пустой
+        if (!empty($this->config['webhook_url'])) {
             $this->webhookUrl = rtrim($this->config['webhook_url'], '/') . '/';
         }
         
-        // 2. Инициализируем OAuth-данные, если они есть
-        if (isset($this->config['auth_id']) && isset($this->config['domain'])) {
+        // 2. Инициализируем OAuth ТОЛЬКО если ОБА поля заполнены
+        if (!empty($this->config['auth_id']) && !empty($this->config['domain'])) {
             $this->accessToken = $this->config['auth_id'];
             $this->refreshToken = $this->config['refresh_id'] ?? null;
             $this->oauthRestUrl = 'https://' . $this->config['domain'] . '/rest/';
@@ -553,16 +549,37 @@ class Bitrix24Provider implements CrmProviderInterface
                 'deal' => 'crm.deal.fields',
                 'contact' => 'crm.contact.fields',
                 'company' => 'crm.company.fields',
+                'task' => 'crm.task.fields',
                 default => throw new \Exception("Unsupported entity type: {$entityType}"),
             };
 
+            \Log::info('Bitrix24 getFields called', [
+                'entity_type' => $entityType,
+                'method' => $method
+            ]);
+
             $response = $this->makeRequest($method);
+            //dd($response);
+
+            \Log::info('Bitrix24 getFields raw response', [
+                'entity_type' => $entityType,
+                'method' => $method,
+                'response_type' => gettype($response),
+                'response_is_array' => is_array($response),
+                'response_keys' => is_array($response) ? array_keys($response) : 'not array',
+                'has_result' => isset($response['result']),
+                'result_type' => isset($response['result']) ? gettype($response['result']) : 'not set',
+                'result_count' => isset($response['result']) && is_array($response['result']) ? count($response['result']) : 0,
+                'full_response' => $response // ОСТОРОЖНО: может быть большой
+            ]);
 
             return $response['result'] ?? [];
+            
         } catch (\Exception $e) {
-            Log::error('Bitrix24 get fields failed', [
+            \Log::error('Bitrix24 get fields failed', [
                 'entity_type' => $entityType,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             return [];
         }
@@ -692,11 +709,11 @@ class Bitrix24Provider implements CrmProviderInterface
     protected function makeRequest(string $method, array $params = []): array
     {
         // --- ИСПРАВЛЕНИЕ: Улучшенная логика с явной обработкой ошибки токена и однократной попыткой обновления ---
-        $isOauth = $this->oauthRestUrl && $this->accessToken;
+        $isOauth = !empty($this->oauthRestUrl) && !empty($this->accessToken);
         $url = $isOauth ? ($this->oauthRestUrl . $method) : ($this->webhookUrl . $method);
-
+        info('makeRequest');
         if (!$url) {
-            throw new \Exception('Bitrix24 integration is not configured with Webhook URL or OAuth.');
+            throw new \Exception('Bitrix24 integration is not configured');
         }
 
         if ($isOauth) {
@@ -704,6 +721,8 @@ class Bitrix24Provider implements CrmProviderInterface
         }
 
         try {
+            info('API bitrix24');
+            info($url);
             $response = $this->client->post($url, ['json' => $params]);
             $result = json_decode($response->getBody()->getContents(), true);
 

@@ -34,6 +34,7 @@ Route::prefix('widget')->group(function () {
     Route::post('/{bot:slug}/end', [WidgetController::class, 'endConversation'])->name('widget.end');
     Route::post('/{bot:slug}/poll', [WidgetController::class, 'pollMessages'])->name('widget.poll');
     Route::post('/{bot:slug}/confirm-delivery', [WidgetController::class, 'confirmDelivery'])->name('widget.confirm-delivery');
+    Route::post('/{bot:slug}/update-user-info', [WidgetController::class, 'updateUserInfo'])->name('widget.update-user-info');
 });
 
 
@@ -133,6 +134,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 Route::get('/conversations/{conversation}/export', [ConversationController::class, 'export'])->name('conversations.export');
                 Route::post('/conversations/{conversation}/takeover', [ConversationController::class, 'takeover'])->name('conversations.takeover');
                 Route::post('/conversations/{conversation}/close', [ConversationController::class, 'close'])->name('conversations.close');
+                Route::post('/conversations/{conversation}/return-to-bot', [ConversationController::class, 'returnToBot'])->name('conversations.return-to-bot');
 
                 Route::prefix('functions')->group(function () {
                     Route::get('/', [App\Http\Controllers\BotFunctionController::class, 'index'])->name('functions.index');
@@ -411,6 +413,9 @@ Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
         Route::get('/{provider}/lead-sources', 
             [App\Http\Controllers\Api\CrmFieldsController::class, 'getLeadSources'])
             ->name('api.crm.lead-sources');
+        Route::get('/{provider}/pipelines', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getPipelineStages'])
+            ->name('api.crm.pipeline-stages');
     });
 });
 Route::get('/test/bitrix24-events/{botId}', function($botId) {

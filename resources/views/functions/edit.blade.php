@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Создать функцию')
+@section('title', 'Редактировать функцию')
 
 @section('content')
 <style type="text/css">
@@ -72,7 +72,6 @@
         font-size: 16px;
     }
 
-    /* Анимация загрузки */
     @keyframes pulse {
         0% { opacity: 1; }
         50% { opacity: 0.5; }
@@ -83,7 +82,6 @@
         animation: pulse 1.5s infinite;
     }
 
-    /* Подсказки для полей */
     .field-hint {
         font-size: 11px;
         color: #9ca3af;
@@ -100,12 +98,19 @@
     <div class="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         
         <div class="mb-8">
-            <h1 class="text-3xl font-bold text-gray-800">Создание функции для бота</h1>
-            <p class="text-gray-500 mt-1">Настройте параметры, действия и поведение для новой функции.</p>
+            <h1 class="text-3xl font-bold text-gray-800">Редактирование функции: {{ $function->display_name }}</h1>
+            <p class="text-gray-500 mt-1">Измените параметры, действия и поведение функции.</p>
         </div>
 
-        <form id="functionForm" method="POST" action="{{ route('functions.store', [$organization, $bot]) }}" class="space-y-6">
+        @if(session('error'))
+            <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-4">
+                {{ session('error') }}
+            </div>
+        @endif
+
+        <form id="functionForm" method="POST" action="{{ route('functions.update', [$organization, $bot, $function]) }}" class="space-y-6">
             @csrf
+            @method('PUT')
             
             <!-- Основная информация -->
             <div class="bg-white p-6 rounded-lg shadow-sm">
@@ -114,12 +119,14 @@
                     <div>
                         <label for="name" class="block text-sm font-medium text-gray-700">Код функции (английский)</label>
                         <input type="text" id="name" name="name" pattern="[a-z_]+" required
+                               value="{{ old('name', $function->name) }}"
                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                placeholder="create_lead">
                     </div>
                     <div>
                         <label for="display_name" class="block text-sm font-medium text-gray-700">Название для отображения</label>
                         <input type="text" id="display_name" name="display_name" required
+                               value="{{ old('display_name', $function->display_name) }}"
                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                placeholder="Создание лида в CRM">
                     </div>
@@ -129,22 +136,23 @@
                     <label for="description" class="block text-sm font-medium text-gray-700">Описание</label>
                     <textarea id="description" name="description" rows="3"
                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                              placeholder="Функция извлекает контактные данные из диалога и создает лид в Битрикс24"></textarea>
+                              placeholder="Функция извлекает контактные данные из диалога и создает лид в Битрикс24">{{ old('description', $function->description) }}</textarea>
                 </div>
 
                 <div class="mt-4">
                     <label for="trigger_type" class="block text-sm font-medium text-gray-700">Когда запускать функцию</label>
                     <select id="trigger_type" name="trigger_type" onchange="toggleTriggerKeywords(this)"
                             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                        <option value="auto">Автоматически при обнаружении данных</option>
-                        <option value="keyword">По ключевым словам</option>
-                        <option value="manual">Только вручную</option>
+                        <option value="auto" {{ old('trigger_type', $function->trigger_type) == 'auto' ? 'selected' : '' }}>Автоматически при обнаружении данных</option>
+                        <option value="keyword" {{ old('trigger_type', $function->trigger_type) == 'keyword' ? 'selected' : '' }}>По ключевым словам</option>
+                        <option value="manual" {{ old('trigger_type', $function->trigger_type) == 'manual' ? 'selected' : '' }}>Только вручную</option>
                     </select>
                 </div>
                 
-                <div id="triggerKeywords" class="hidden mt-4">
+                <div id="triggerKeywords" class="{{ old('trigger_type', $function->trigger_type) == 'keyword' ? '' : 'hidden' }} mt-4">
                     <label for="trigger_keywords_text" class="block text-sm font-medium text-gray-700">Ключевые слова (через запятую)</label>
                     <input type="text" id="trigger_keywords_text" name="trigger_keywords_text"
+                           value="{{ old('trigger_keywords_text', is_array($function->trigger_keywords) ? implode(', ', $function->trigger_keywords) : '') }}"
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                            placeholder="создать лид, сохранить контакт, добавить в CRM">
                 </div>
@@ -179,56 +187,76 @@
                     <div>
                         <label for="on_success" class="block text-sm font-medium text-gray-700">При успешном выполнении</label>
                         <select id="on_success" name="behavior[on_success]" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                            <option value="continue">Продолжить диалог</option>
-                            <option value="pause">Поставить на паузу</option>
-                            <option value="enhance_prompt">Дополнить промпт</option>
+                            <option value="continue" {{ old('behavior.on_success', $function->behavior->on_success ?? 'continue') == 'continue' ? 'selected' : '' }}>Продолжить диалог</option>
+                            <option value="pause" {{ old('behavior.on_success', $function->behavior->on_success ?? '') == 'pause' ? 'selected' : '' }}>Поставить на паузу</option>
+                            <option value="enhance_prompt" {{ old('behavior.on_success', $function->behavior->on_success ?? '') == 'enhance_prompt' ? 'selected' : '' }}>Дополнить промпт</option>
                         </select>
                     </div>
                     <div>
                         <label for="on_error" class="block text-sm font-medium text-gray-700">При ошибке</label>
                         <select id="on_error" name="behavior[on_error]" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                            <option value="continue">Продолжить диалог</option>
-                            <option value="pause">Поставить на паузу</option>
-                            <option value="notify">Уведомить администратора</option>
+                            <option value="continue" {{ old('behavior.on_error', $function->behavior->on_error ?? 'continue') == 'continue' ? 'selected' : '' }}>Продолжить диалог</option>
+                            <option value="pause" {{ old('behavior.on_error', $function->behavior->on_error ?? '') == 'pause' ? 'selected' : '' }}>Поставить на паузу</option>
+                            <option value="notify" {{ old('behavior.on_error', $function->behavior->on_error ?? '') == 'notify' ? 'selected' : '' }}>Уведомить администратора</option>
                         </select>
                     </div>
                 </div>
                 <div class="mt-4">
                     <label for="success_message" class="block text-sm font-medium text-gray-700">Сообщение при успехе</label>
                     <input type="text" id="success_message" name="behavior[success_message]"
+                           value="{{ old('behavior.success_message', $function->behavior->success_message ?? '') }}"
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                            placeholder="✓ Лид #{lead_id} успешно создан">
                 </div>
                 <div class="mt-4">
                     <label for="error_message" class="block text-sm font-medium text-gray-700">Сообщение при ошибке</label>
                     <input type="text" id="error_message" name="behavior[error_message]"
+                           value="{{ old('behavior.error_message', $function->behavior->error_message ?? '') }}"
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                            placeholder="Не удалось создать лид: {error}">
                 </div>
-                 <div class="mt-4 hidden" id="promptEnhancement">
-                    <label for="prompt_enhancement" class="block text-sm font-medium text-gray-700">Дополнение к промпту</glabel>
+                 <div class="mt-4 {{ old('behavior.on_success', $function->behavior->on_success ?? '') == 'enhance_prompt' ? '' : 'hidden' }}" id="promptEnhancement">
+                    <label for="prompt_enhancement" class="block text-sm font-medium text-gray-700">Дополнение к промпту</label>
                     <textarea id="prompt_enhancement" name="behavior[prompt_enhancement]" rows="3"
                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                              placeholder="Лид создан. Теперь помоги клиенту выбрать подходящий тариф."></textarea>
+                              placeholder="Лид создан. Теперь помоги клиенту выбрать подходящий тариф.">{{ old('behavior.prompt_enhancement', $function->behavior->prompt_enhancement ?? '') }}</textarea>
                 </div>
             </div>
 
             <div class="flex items-center justify-end gap-4 pt-4">
-                <a href="{{ route('functions.index', [$organization, $bot]) }}"
+                <a href="{{ route('functions.show', [$organization, $bot, $function]) }}"
                    class="inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                     Отмена
                 </a>
                 <button type="submit"
                         class="inline-flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Создать функцию
+                    Сохранить изменения
                 </button>
             </div>
         </form>
     </div>
 </div>
+@php
+    $existingParametersJson = old('parameters', $function->parameters->map(function($p) {
+        return [
+            'code' => $p->code,
+            'name' => $p->name,
+            'type' => $p->type,
+            'description' => $p->description,
+            'is_required' => $p->is_required
+        ];
+    })->toArray());
 
+    $existingActionsJson = old('actions', $function->actions->map(function($a) {
+        return [
+            'type' => $a->type,
+            'provider' => $a->provider,
+            'config' => $a->config
+        ];
+    })->toArray());
+@endphp
 <script>
-// CSS классы для единообразного стиля
+// Копируем весь JavaScript из create.blade.php
 const inputClasses = "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm";
 const labelClasses = "block text-sm font-medium text-gray-700";
 const selectClasses = "mt-1 " + inputClasses;
@@ -236,7 +264,12 @@ const selectClasses = "mt-1 " + inputClasses;
 let parameterIndex = 0;
 let actionIndex = 0;
 
-function addParameter() {
+// Данные для инициализации
+const existingParameters = @json($existingParametersJson);
+const existingActions = @json($existingActionsJson);
+
+// Вставляем все функции из create.blade.php
+function addParameter(data = null) {
     const container = document.getElementById('parametersContainer');
     const html = `
         <div class="parameter-item border border-gray-200 p-4 rounded-md bg-gray-50/50">
@@ -248,31 +281,35 @@ function addParameter() {
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="${labelClasses}">Код параметра</label>
-                    <input type="text" name="parameters[${parameterIndex}][code]" pattern="[a-z_]+" required placeholder="client_name" class="${selectClasses}">
+                    <input type="text" name="parameters[${parameterIndex}][code]" pattern="[a-z_]+" required 
+                           value="${data?.code || ''}" placeholder="client_name" class="${selectClasses}">
                 </div>
                 <div>
                     <label class="${labelClasses}">Название</label>
-                    <input type="text" name="parameters[${parameterIndex}][name]" required placeholder="Имя клиента" class="${selectClasses}">
+                    <input type="text" name="parameters[${parameterIndex}][name]" required 
+                           value="${data?.name || ''}" placeholder="Имя клиента" class="${selectClasses}">
                 </div>
                 <div>
                     <label class="${labelClasses}">Тип</label>
                     <select name="parameters[${parameterIndex}][type]" required class="${selectClasses}">
-                        <option value="string">Текстовый</option>
-                        <option value="number">Числовой</option>
-                        <option value="boolean">Логический</option>
-                        <option value="date">Дата</option>
+                        <option value="string" ${data?.type == 'string' ? 'selected' : ''}>Текстовый</option>
+                        <option value="number" ${data?.type == 'number' ? 'selected' : ''}>Числовой</option>
+                        <option value="boolean" ${data?.type == 'boolean' ? 'selected' : ''}>Логический</option>
+                        <option value="date" ${data?.type == 'date' ? 'selected' : ''}>Дата</option>
                     </select>
                 </div>
             </div>
             
             <div class="mt-4">
                 <label class="${labelClasses}">Что искать в диалоге (подсказка для AI)</label>
-                <input type="text" name="parameters[${parameterIndex}][description]" placeholder="Имя человека, с которым общается бот" class="${selectClasses}">
+                <input type="text" name="parameters[${parameterIndex}][description]" 
+                       value="${data?.description || ''}" placeholder="Имя человека, с которым общается бот" class="${selectClasses}">
             </div>
             
             <div class="mt-4">
                 <label class="flex items-center text-sm text-gray-700">
-                    <input type="checkbox" name="parameters[${parameterIndex}][is_required]" value="1" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                    <input type="checkbox" name="parameters[${parameterIndex}][is_required]" value="1" 
+                           ${data?.is_required ? 'checked' : ''} class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                     <span class="ml-2">Обязательный параметр</span>
                 </label>
             </div>
@@ -284,8 +321,10 @@ function addParameter() {
     updateParameterSelects();
 }
 
-function addAction() {
+function addAction(data = null) {
     const container = document.getElementById('actionsContainer');
+    const currentIndex = actionIndex;
+    
     const html = `
         <div class="action-item border border-gray-200 p-4 rounded-md bg-gray-50/50">
             <div class="flex justify-between items-center mb-4">
@@ -296,7 +335,7 @@ function addAction() {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label class="${labelClasses}">Провайдер</label>
-                    <select name="actions[${actionIndex}][provider]" onchange="updateActionType(this, ${actionIndex})" class="${selectClasses}">
+                    <select name="actions[${currentIndex}][provider]" id="actionProvider_${currentIndex}" onchange="updateActionType(this, ${currentIndex})" class="${selectClasses}">
                         <option value="">Выберите провайдера</option>
                         @foreach($crmIntegrations as $crm)
                             <option value="{{ $crm->type }}">{{ $crm->name }}</option>
@@ -307,13 +346,13 @@ function addAction() {
                 </div>
                 <div>
                     <label class="${labelClasses}">Тип действия</label>
-                    <select name="actions[${actionIndex}][type]" id="actionType_${actionIndex}" class="${selectClasses}">
+                    <select name="actions[${currentIndex}][type]" id="actionType_${currentIndex}" class="${selectClasses}">
                         <option value="">Сначала выберите провайдера</option>
                     </select>
                 </div>
             </div>
             
-            <div id="actionConfig_${actionIndex}" class="mt-4 pt-4 border-t border-gray-200">
+            <div id="actionConfig_${currentIndex}" class="mt-4 pt-4 border-t border-gray-200">
                 <!-- Динамическая конфигурация -->
             </div>
         </div>
@@ -321,13 +360,129 @@ function addAction() {
     
     container.insertAdjacentHTML('beforeend', html);
     actionIndex++;
+    
+    // Если есть данные, инициализируем действие
+    if (data) {
+        console.log('Initializing action with data:', currentIndex, data);
+        
+        // Сохраняем конфиг глобально для доступа
+        window[`actionConfig_${currentIndex}`] = data.config;
+        
+        setTimeout(() => {
+            const providerSelect = document.getElementById(`actionProvider_${currentIndex}`);
+            if (providerSelect) {
+                providerSelect.value = data.provider;
+                updateActionType(providerSelect, currentIndex);
+                
+                setTimeout(() => {
+                    const typeSelect = document.getElementById(`actionType_${currentIndex}`);
+                    if (typeSelect) {
+                        typeSelect.value = data.type;
+                        
+                        // Вызываем showActionConfig с передачей существующего конфига
+                        showActionConfig(data.provider, data.type, currentIndex, data.config);
+                    }
+                }, 300);
+            }
+        }, 100);
+    }
+}
+
+function restoreFieldMappings(actionIndex, mappings, config) {
+    const container = document.getElementById(`fieldList_${actionIndex}`);
+    if (!container) {
+        console.warn('Container not found for action', actionIndex);
+        return;
+    }
+    
+    console.log('Restoring mappings to container', actionIndex, 'Mappings:', mappings);
+    
+    // Очищаем контейнер
+    container.innerHTML = '';
+    
+    if (!mappings || mappings.length === 0) {
+        console.log('No mappings to restore, adding empty field');
+        addFieldMapping(actionIndex);
+        return;
+    }
+    
+    // Добавляем каждый маппинг
+    mappings.forEach((mapping, index) => {
+        const fields = window.crmFields?.[actionIndex] || getDefaultFields('lead');
+        const parameters = getAvailableParameters();
+        
+        console.log('Creating mapping', index, mapping, 'Available fields:', fields.length);
+        
+        const mappingHtml = `
+            <div class="field-mapping-item" style="display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; background: #f9fafb; border-radius: 5px;">
+                <div style="flex: 1;">
+                    <label style="font-size: 12px; color: #6b7280;">Поле CRM</label>
+                    <select name="actions[${actionIndex}][config][field_mappings][${index}][crm_field]" 
+                            style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                        <option value="">Выберите поле</option>
+                        ${fields.map(field => `
+                            <option value="${field.code}" ${mapping.crm_field == field.code ? 'selected' : ''}>
+                                ${field.title} ${field.isRequired ? '*' : ''}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                
+                <div style="flex: 1;">
+                    <label style="font-size: 12px; color: #6b7280;">Источник данных</label>
+                    <select name="actions[${actionIndex}][config][field_mappings][${index}][source_type]" 
+                            onchange="toggleValueInput(${actionIndex}, ${index}, this.value)"
+                            style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                        <option value="parameter" ${mapping.source_type == 'parameter' ? 'selected' : ''}>Из параметра функции</option>
+                        <option value="static" ${mapping.source_type == 'static' ? 'selected' : ''}>Статичное значение</option>
+                    </select>
+                </div>
+                
+                <div style="flex: 1;" id="valueInput_${actionIndex}_${index}">
+                    ${getValueInputHTML(actionIndex, index, mapping.source_type, mapping.value, parameters)}
+                </div>
+                
+                <div style="padding-top: 20px;">
+                    <button type="button" onclick="removeFieldMapping(this)" 
+                            style="padding: 8px; color: #ef4444; background: white; border: 1px solid #ef4444; border-radius: 4px;">
+                        ✕
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        container.insertAdjacentHTML('beforeend', mappingHtml);
+    });
+}
+
+function getValueInputHTML(actionIndex, mappingIndex, sourceType, value, parameters) {
+    if (sourceType === 'static') {
+        return `
+            <label style="font-size: 12px; color: #6b7280;">Значение</label>
+            <input type="text" 
+                   name="actions[${actionIndex}][config][field_mappings][${mappingIndex}][value]"
+                   value="${value || ''}"
+                   placeholder="Введите значение"
+                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+        `;
+    } else {
+        return `
+            <label style="font-size: 12px; color: #6b7280;">Параметр</label>
+            <select name="actions[${actionIndex}][config][field_mappings][${mappingIndex}][value]"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                <option value="">Выберите параметр</option>
+                ${parameters.map(param => `
+                    <option value="${param.code}" ${value == param.code ? 'selected' : ''}>${param.name} (${param.code})</option>
+                `).join('')}
+            </select>
+        `;
+    }
 }
 
 function removeDynamicItem(button, selector) {
     button.closest(selector).remove();
     updateParameterSelects();
 }
-
 
 function updateActionType(select, index) {
     const provider = select.value;
@@ -357,18 +512,20 @@ function updateActionType(select, index) {
         });
     }
     
+    // Добавляем обработчик только для новых действий (когда нет сохраненного конфига)
     typeSelect.onchange = function() {
-        showActionConfig(provider, this.value, index);
+        const existingConfig = window[`actionConfig_${index}`];
+        if (!existingConfig) {
+            // Новое действие - показываем конфиг без данных
+            showActionConfig(provider, this.value, index);
+        }
+        // Если конфиг существует, он уже был загружен в addAction
     };
-    // Trigger change to load config for the first item
-    typeSelect.dispatchEvent(new Event('change'));
 }
 
-
-function showActionConfig(provider, type, index) {
+function showActionConfig(provider, type, index, existingConfig = null) {
     const configDiv = document.getElementById(`actionConfig_${index}`);
     
-    // Определяем тип сущности для каждого действия
     const entityTypeMap = {
         'create_lead': 'lead',
         'create_deal': 'deal',
@@ -378,12 +535,9 @@ function showActionConfig(provider, type, index) {
     
     const entityType = entityTypeMap[type];
     
-    // Если это действие Битрикс24 с поддерживаемым типом
     if (provider === 'bitrix24' && entityType) {
-        // Показываем загрузку
         configDiv.innerHTML = '<div class="loading">⏳ Загрузка полей CRM...</div>';
         
-        // Загружаем поля из CRM
         loadCRMFields(provider, entityType).then(fields => {
             const entityLabels = {
                 'lead': 'лида',
@@ -397,11 +551,10 @@ function showActionConfig(provider, type, index) {
                 
                 <div class="field-mapping-container" id="fieldMapping_${index}">
                     <div class="field-mapping-list" id="fieldList_${index}">
-                        <!-- Здесь будут динамические поля -->
                     </div>
                     
                     <button type="button" onclick="addFieldMapping(${index})" 
-                            class="btn-add-field" style="margin-top: 15px; padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 5px;">
+                            class="btn-add-field" style="margin-top: 15px;">
                         + Добавить поле
                     </button>
                 </div>
@@ -414,15 +567,26 @@ function showActionConfig(provider, type, index) {
                 </div>
             `;
             
-            // Сохраняем поля для использования
+            // Сохраняем поля ДО восстановления маппингов
             window.crmFields = window.crmFields || {};
             window.crmFields[index] = fields;
             
-            // Загружаем дополнительные данные
-            loadAdditionalData(provider, entityType, index);
+            console.log('Fields loaded for action', index, fields.length, 'fields');
             
-            // Добавляем первое поле по умолчанию
-            addFieldMapping(index);
+            // Загружаем дополнительные данные
+            loadAdditionalData(provider, entityType, index, existingConfig);
+            
+            // ТЕПЕРЬ восстанавливаем маппинги, когда поля уже загружены
+            if (existingConfig && existingConfig.field_mappings) {
+                console.log('Restoring field mappings for action', index, existingConfig.field_mappings);
+                restoreFieldMappings(index, existingConfig.field_mappings, existingConfig);
+            } else {
+                // Добавляем одно пустое поле по умолчанию
+                addFieldMapping(index);
+            }
+        }).catch(error => {
+            console.error('Error loading fields:', error);
+            configDiv.innerHTML = '<div class="text-red-500">Ошибка загрузки полей</div>';
         });
     } else if (provider === 'webhook') {
         showWebhookConfig(configDiv, type, index);
@@ -522,19 +686,67 @@ function getAdditionalSettingsHTML(entityType, index) {
 }
 
 // Загрузка дополнительных данных
-async function loadAdditionalData(provider, entityType, index) {
+async function loadAdditionalData(provider, entityType, index, existingConfig = null) {
     switch(entityType) {
         case 'lead':
             await loadLeadStatuses(provider, index);
             await loadCRMUsers(provider, index);
+            
+            // Восстанавливаем значения после загрузки
+            if (existingConfig) {
+                setTimeout(() => {
+                    if (existingConfig.status_id) {
+                        const statusSelect = document.getElementById(`leadStatus_${index}`);
+                        if (statusSelect) statusSelect.value = existingConfig.status_id;
+                    }
+                    if (existingConfig.assigned_by_id) {
+                        const assignedSelect = document.getElementById(`assignedUser_${index}`);
+                        if (assignedSelect) assignedSelect.value = existingConfig.assigned_by_id;
+                    }
+                }, 200);
+            }
             break;
+            
         case 'deal':
             await loadDealCategories(provider, index);
             await loadCRMUsers(provider, index);
+            
+            // Восстанавливаем значения после загрузки
+            if (existingConfig) {
+                setTimeout(() => {
+                    if (existingConfig.category_id) {
+                        const categorySelect = document.getElementById(`dealCategory_${index}`);
+                        if (categorySelect) {
+                            categorySelect.value = existingConfig.category_id;
+                            categorySelect.dispatchEvent(new Event('change'));
+                            
+                            // После загрузки стадий восстанавливаем выбранную стадию
+                            if (existingConfig.stage_id) {
+                                setTimeout(() => {
+                                    const stageSelect = document.getElementById(`dealStage_${index}`);
+                                    if (stageSelect) stageSelect.value = existingConfig.stage_id;
+                                }, 500);
+                            }
+                        }
+                    }
+                    if (existingConfig.assigned_by_id) {
+                        const assignedSelect = document.getElementById(`assignedUser_${index}`);
+                        if (assignedSelect) assignedSelect.value = existingConfig.assigned_by_id;
+                    }
+                }, 200);
+            }
             break;
+            
         case 'contact':
         case 'task':
             await loadCRMUsers(provider, index);
+            
+            if (existingConfig && existingConfig.assigned_by_id) {
+                setTimeout(() => {
+                    const assignedSelect = document.getElementById(`assignedUser_${index}`);
+                    if (assignedSelect) assignedSelect.value = existingConfig.assigned_by_id;
+                }, 200);
+            }
             break;
     }
 }
@@ -913,23 +1125,31 @@ function updateParameterSelects() {
 }
 
 
-document.querySelectorAll('input[name^="parameters["]').forEach(input => {
-    input.addEventListener('keyup', updateParameterSelects);
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    // Загружаем существующие параметры
+    existingParameters.forEach(param => {
+        addParameter(param);
+    });
+    
+    // Если нет параметров, добавляем пустой
+    if (existingParameters.length === 0) {
+        addParameter();
+    }
+    
+    // Загружаем существующие действия
+    existingActions.forEach(action => {
+        addAction(action);
+    });
+    
+    updateParameterSelects();
 });
 
-
-function toggleTriggerKeywords(select) {
-    const keywordsDiv = document.getElementById('triggerKeywords');
-    keywordsDiv.style.display = select.value === 'keyword' ? 'block' : 'none';
-    if(select.value !== 'keyword'){
-        document.getElementById('trigger_keywords_text').value = '';
-    }
-}
-
+// Обработка формы (как в create.blade.php)
 document.getElementById('functionForm').addEventListener('submit', function(e) {
     const keywordsText = document.querySelector('[name="trigger_keywords_text"]');
     if (keywordsText && keywordsText.value) {
-        // Clear previous hidden inputs to avoid duplicates
         this.querySelectorAll('input[name^="trigger_keywords["]').forEach(el => el.remove());
 
         const keywords = keywordsText.value.split(',').map(k => k.trim()).filter(k => k);
@@ -943,12 +1163,15 @@ document.getElementById('functionForm').addEventListener('submit', function(e) {
     }
 });
 
-// Initial setup
-document.addEventListener('DOMContentLoaded', function() {
-    addParameter();
-    // In case of validation error and old() data, update selects
-    updateParameterSelects(); 
+// Показ/скрытие поля prompt_enhancement
+document.getElementById('on_success').addEventListener('change', function() {
+    const promptDiv = document.getElementById('promptEnhancement');
+    promptDiv.classList.toggle('hidden', this.value !== 'enhance_prompt');
 });
-
 </script>
+
+{{-- ВАЖНО: Вставьте сюда ВСЕ остальные функции JavaScript из create.blade.php --}}
+{{-- updateActionType, showActionConfig, loadCRMFields, и все остальные --}}
+{{-- Они идентичны, поэтому можно просто скопировать --}}
+
 @endsection

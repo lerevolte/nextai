@@ -124,15 +124,23 @@ class AIService
     {
         $messages = [];
         
-        // Системный промпт - сокращаем если используем Gemini
+        // Системный промпт
+        $systemPrompt = $bot->system_prompt;
+        
+        // Добавляем информацию о пользователе в системный промпт, если она есть
+        if ($conversation->user_name) {
+            $systemPrompt .= "\n\nИмя пользователя: " . $conversation->user_name;
+            $systemPrompt .= "\nЭто НЕ первое сообщение пользователя, диалог уже начат. Не нужно приветствовать снова.";
+        }
+        
         if ($bot->ai_provider === 'gemini') {
-            $systemPrompt = Str::limit($bot->system_prompt, 500);
+            $systemPrompt = Str::limit($systemPrompt, 500);
             if ($context) {
                 $systemPrompt .= "\n\nКонтекст: " . Str::limit($context, 1000);
             }
             $messages[] = ['role' => 'system', 'content' => $systemPrompt];
         } else {
-            $messages[] = ['role' => 'system', 'content' => $bot->system_prompt];
+            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
             if ($context) {
                 $messages[] = ['role' => 'system', 'content' => $context];
             }
@@ -146,6 +154,26 @@ class AIService
             ->take($historyLimit)
             ->get()
             ->reverse();
+
+        // Проверяем, есть ли уже приветственное сообщение в истории
+        $hasWelcomeMessage = false;
+        foreach ($history as $msg) {
+            $content = mb_strtolower($msg->content);
+            if (stripos($content, 'здравствуйте') !== false || 
+                stripos($content, 'добрый день') !== false ||
+                stripos($content, 'меня зовут') !== false) {
+                $hasWelcomeMessage = true;
+                break;
+            }
+        }
+        
+        // Если уже было приветствие, добавляем инструкцию в контекст
+        if ($hasWelcomeMessage) {
+            $messages[] = [
+                'role' => 'system', 
+                'content' => 'ВАЖНО: Приветствие уже было в диалоге. Продолжай разговор естественно, БЕЗ повторного приветствия.'
+            ];
+        }
 
         foreach ($history as $msg) {
             $messages[] = [

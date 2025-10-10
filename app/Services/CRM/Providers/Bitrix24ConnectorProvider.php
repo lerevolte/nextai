@@ -725,6 +725,7 @@ class Bitrix24ConnectorProvider
                 // Парсим текст и определяем имя оператора
                 $operatorName = $messageData['user']['name'] ?? 'Оператор';
                 $messageText = $rawText;
+                $isRealOperator = false; // Флаг: это реальный оператор, а не бот
 
                 if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
                     $operatorName = $matches[1];
@@ -732,15 +733,32 @@ class Bitrix24ConnectorProvider
                     
                     // --- ПРОВЕРКА 7: Проверяем имя отправителя ---
                     $botNames = ['бот', 'bot', 'арина', 'ассистент', 'assistant', 'виртуальный помощник'];
+                    $isRealOperator = true;
+                    // foreach ($botNames as $botName) {
+
+                    //     if (stripos($operatorName, $botName) !== false) {
+                    //         Log::info("Bot-like name detected in operator name, skipping", [
+                    //             'operator_name' => $operatorName,
+                    //             'conversation_id' => $conversation->id
+                    //         ]);
+                    //         $this->confirmMessageDelivery($conversation->bot, $messageData);
+                    //         continue 2; // Выходим из обоих циклов
+                    //     }
+                    // }
                     foreach ($botNames as $botName) {
                         if (stripos($operatorName, $botName) !== false) {
-                            Log::info("Bot-like name detected in operator name, skipping", [
-                                'operator_name' => $operatorName,
-                                'conversation_id' => $conversation->id
-                            ]);
-                            $this->confirmMessageDelivery($conversation->bot, $messageData);
-                            continue 2; // Выходим из обоих циклов
+                            $isRealOperator = false;
+                            break;
                         }
+                    }
+                    
+                    if (!$isRealOperator) {
+                        Log::info("Skipping non-operator formatted message", [
+                            'sender_name' => $operatorName,
+                            'chat_id' => $chatId,
+                            'text_preview' => substr($messageText, 0, 50)
+                        ]);
+                        continue;
                     }
                 } else {
                     $messageText = preg_replace(['/\[br\]/i', '/\[\/?b\]/i'], ["\n", ''], $messageText);
@@ -784,7 +802,7 @@ class Bitrix24ConnectorProvider
                 $this->confirmMessageDelivery($conversation->bot, $messageData);
 
                 // Меняем статус только если это действительно сообщение от человека-оператора
-                if ($conversation->status === 'active') {
+                if ($isRealOperator && $conversation->status === 'active') {
                     // Дополнительная проверка: убедимся, что это не автоматическое сообщение
                     $isAutoMessage = false;
                     $autoKeywords = ['виртуальный помощник', 'чем могу помочь', 'добро пожаловать'];

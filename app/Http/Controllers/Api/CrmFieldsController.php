@@ -35,28 +35,46 @@ class CrmFieldsController extends Controller
             ]);
         }
         
+        
         // Кэшируем поля на 1 час
         $cacheKey = "crm_fields_{$integration->id}_{$entityType}";
         
-        $fields = Cache::remember($cacheKey, 3600, function () use ($integration, $entityType) {
-            $provider = $this->crmService->getProvider($integration);
-            
-            if (!$provider) {
-                return $this->getDefaultFields($integration->type, $entityType);
-            }
-            
+        \Log::info('Skipping cache for debugging');
+
+        $provider = $this->crmService->getProvider($integration);
+
+        \Log::info('Provider loaded', [
+            'provider_exists' => $provider !== null,
+            'provider_class' => $provider ? get_class($provider) : null
+        ]);
+
+        if (!$provider) {
+            \Log::warning('Provider not found, returning default fields');
+            $fields = $this->getDefaultFields($integration->type, $entityType);
+        } else {
             try {
+                \Log::info('Calling provider->getFields()', ['entityType' => $entityType]);
+                
                 $rawFields = $provider->getFields($entityType);
-                return $this->formatFields($rawFields, $integration->type);
+                //dd($rawFields);
+                \Log::info('Raw fields received', [
+                    'count' => is_array($rawFields) ? count($rawFields) : 'not array',
+                    'sample' => is_array($rawFields) && count($rawFields) > 0 ? array_keys(array_slice($rawFields, 0, 3)) : 'empty or not array'
+                ]);
+                
+                $fields = $this->formatFields($rawFields, $integration->type);
+                
+                \Log::info('Fields formatted', ['count' => count($fields)]);
             } catch (\Exception $e) {
                 \Log::error('Failed to load CRM fields', [
                     'provider' => $integration->type,
                     'entity' => $entityType,
-                    'error' => $e->getMessage()
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
                 ]);
-                return $this->getDefaultFields($integration->type, $entityType);
+                $fields = $this->getDefaultFields($integration->type, $entityType);
             }
-        });
+        }
         
         return response()->json(['fields' => $fields]);
     }
@@ -211,5 +229,47 @@ class CrmFieldsController extends Controller
             ['STATUS_ID' => 'IN_PROCESS', 'NAME' => 'В работе'],
             ['STATUS_ID' => 'PROCESSED', 'NAME' => 'Обработан'],
         ];
+    }
+
+    public function getPipelineStages(Request $request, string $provider)
+    {
+        $pipelineId = $request->query('pipeline_id');
+        
+        if (!$pipelineId) {
+            return response()->json(['stages' => []]);
+        }
+        
+        $organization = $request->user()->organization;
+        $integration = $organization->crmIntegrations()
+            ->where('type', $provider)
+            ->where('is_active', true)
+            ->first();
+            
+        if (!$integration) {
+            return response()->json(['stages' => []]);
+        }
+        
+        $cacheKey = "crm_pipeline_stages_{$integration->id}_{$pipelineId}";
+        
+        $stages = Cache::remember($cacheKey, 3600, function () use ($integration, $pipelineId) {
+            $provider = $this->crmService->getProvider($integration);
+            
+            if (!$provider) {
+                return [];
+            }
+            
+            try {
+                return $provider->getPipelineStages($pipelineId);
+            } catch (\Exception $e) {
+                \Log::error('Failed to load pipeline stages', [
+                    'provider' => $integration->type,
+                    'pipeline_id' => $pipelineId,
+                    'error' => $e->getMessage()
+                ]);
+                return [];
+            }
+        });
+        
+        return response()->json(['stages' => $stages]);
     }
 }

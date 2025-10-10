@@ -16,6 +16,7 @@ class MessageObserver
     {
         $this->functionService = $functionService;
     }
+    
     /**
      * Handle the Message "created" event.
      */
@@ -43,8 +44,25 @@ class MessageObserver
             }
         }
 
+        // ВАЖНО: Обрабатываем функции только для сообщений пользователя
+        // И ТОЛЬКО если диалог в статусе 'active' (НЕ waiting_operator)
         if ($message->role === 'user') {
-            $this->functionService->processMessage($message);
+            $conversation = $message->conversation;
+            
+            // Проверяем статус диалога
+            if ($conversation->status === 'waiting_operator') {
+                Log::info('Skipping function processing - operator is handling conversation', [
+                    'conversation_id' => $conversation->id,
+                    'message_id' => $message->id,
+                    'status' => $conversation->status
+                ]);
+                return;
+            }
+            
+            // Только для активных диалогов обрабатываем функции
+            if ($conversation->status === 'active') {
+                $this->functionService->processMessage($message);
+            }
         }
     }
 }

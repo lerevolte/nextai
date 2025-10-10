@@ -200,10 +200,9 @@ class WidgetController extends Controller
         }
 
         // Проверяем, был ли этот диалог уже синхронизирован с Битрикс24
-        // (наличие chat_id - самый надежный признак)
         $wasAlreadySynced = isset($conversation->metadata['bitrix24_chat_id']);
 
-        // Обновляем данные пользователя, если они переданы (например, имя, email)
+        // Обновляем данные пользователя, если они переданы
         $userInfo = $request->input('user_info');
         if ($userInfo) {
             $updateData = [];
@@ -226,12 +225,10 @@ class WidgetController extends Controller
             ]);
 
             // 2. Запускаем создание чата в Битрикс24 ТОЛЬКО ОДИН РАЗ
-            // Если диалог еще не был синхронизирован, запускаем обработчик
             if (!$wasAlreadySynced) {
-                // Log::info("First user message in unsynced conversation {$conversation->id}. Triggering CRM sync.", [
-                //     'message_id' => $userMessage->id
-                // ]);
-                // Этот вызов создаст чат в Битрикс24 и сохранит нужные ID в metadata диалога
+                Log::info("First user message in unsynced conversation {$conversation->id}. Triggering CRM sync.", [
+                    'message_id' => $userMessage->id
+                ]);
                 (new \App\Observers\ConversationObserver())->created($conversation);
             }
 
@@ -239,7 +236,26 @@ class WidgetController extends Controller
             $conversation->increment('messages_count');
             $conversation->update(['last_message_at' => now()]);
 
-            // 4. Генерируем ответ от AI
+            // 4. ПРОВЕРЯЕМ СТАТУС ДИАЛОГА перед генерацией ответа
+            if ($conversation->status === 'waiting_operator') {
+                Log::info('Skipping AI response - operator is handling conversation', [
+                    'conversation_id' => $conversation->id,
+                    'message_id' => $userMessage->id,
+                    'status' => $conversation->status
+                ]);
+                
+                DB::commit();
+                
+                // Возвращаем системное сообщение вместо ответа бота
+                return response()->json([
+                    'success' => true,
+                    'conversation_id' => $conversation->id,
+                    'status' => 'operator_handling',
+                    // Не возвращаем message, чтобы виджет не добавлял ничего в чат
+                ]);
+            }
+
+            // 5. Генерируем ответ от AI только если диалог активен
             $responseContent = '';
             $responseTime = 0;
 
@@ -251,7 +267,7 @@ class WidgetController extends Controller
                 $responseTime = microtime(true) - $startTime;
             }
 
-            // 5. Сохраняем ответ бота в нашу базу
+            // 6. Сохраняем ответ бота в нашу базу
             $botMessage = $conversation->messages()->create([
                 'role' => 'assistant',
                 'content' => $responseContent,
@@ -262,8 +278,7 @@ class WidgetController extends Controller
 
             DB::commit();
 
-            // 6. Отправляем ответ бота в виджет
-            // Ответ в Битрикс24 отправится автоматически через MessageObserver
+            // 7. Отправляем ответ бота в виджет
             return response()->json([
                 'message' => [
                     'id' => $botMessage->id,
@@ -408,5 +423,59 @@ class WidgetController extends Controller
             ]);
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Обновление информации о пользователе без отправки сообщения
+     */
+    public function updateUserInfo(Request $request, Bot $bot)
+    {
+        $request->validate([
+            'session_id' => 'required|string',
+            'user_info' => 'required|array',
+            'user_info.name' => 'required|string|max:255',
+            'user_info.email' => 'nullable|email|max:255',
+            'user_info.phone' => 'nullable|string|max:50',
+        ]);
+
+        $conversation = Conversation::where('external_id', $request->session_id)
+            ->where('bot_id', $bot->id)
+            ->first();
+            
+        if (!$conversation) {
+            return response()->json(['error' => 'Conversation not found'], 404);
+        }
+
+        $userInfo = $request->input('user_info');
+        
+        // Обновляем только пустые поля
+        $updateData = [];
+        
+        if (!empty($userInfo['name']) && empty($conversation->user_name)) {
+            $updateData['user_name'] = $userInfo['name'];
+        }
+        
+        if (!empty($userInfo['email']) && empty($conversation->user_email)) {
+            $updateData['user_email'] = $userInfo['email'];
+        }
+        
+        if (!empty($userInfo['phone']) && empty($conversation->user_phone)) {
+            $updateData['user_phone'] = $userInfo['phone'];
+        }
+        
+        if (!empty($updateData)) {
+            $updateData['user_data'] = array_merge($conversation->user_data ?? [], $userInfo);
+            $conversation->update($updateData);
+            
+            Log::info('User info updated via widget', [
+                'conversation_id' => $conversation->id,
+                'updates' => array_keys($updateData)
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User info updated successfully'
+        ]);
     }
 }

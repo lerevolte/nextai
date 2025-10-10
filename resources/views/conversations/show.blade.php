@@ -31,6 +31,14 @@
                     </button>
                 </form>
             @endif
+            @if($conversation->status === 'waiting_operator')
+                <form method="POST" action="{{ route('conversations.return-to-bot', [$organization, $bot, $conversation]) }}" class="ml-4">
+                    @csrf
+                    <button type="submit" class="bg-blue-600 text-white hover:bg-blue-700" style="padding: 10px 20px; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 500;">
+                        Вернуть боту
+                    </button>
+                </form>
+            @endif
             
             <a href="{{ route('conversations.index', [$organization, $bot]) }}" 
                style="padding: 10px 20px; background: #6b7280; color: white; text-decoration: none; border-radius: 5px; font-weight: 500;">

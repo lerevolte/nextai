@@ -208,4 +208,27 @@ class ConversationController extends Controller
             ->header('Content-Type', 'text/plain')
             ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     }
+
+    /**
+     * Вернуть диалог в активный режим (отключить оператора)
+     */
+    public function returnToBot(Organization $organization, Bot $bot, Conversation $conversation)
+    {
+        if ($conversation->bot_id !== $bot->id || $bot->organization_id !== $organization->id) {
+            abort(403);
+        }
+
+        $conversation->update([
+            'status' => 'active',
+        ]);
+
+        // Добавляем системное сообщение
+        $conversation->messages()->create([
+            'role' => 'system',
+            'content' => 'Диалог передан обратно боту. Ответы будут автоматическими.',
+        ]);
+
+        return redirect()->route('conversations.show', [$organization, $bot, $conversation])
+            ->with('success', 'Диалог возвращен боту');
+    }
 }

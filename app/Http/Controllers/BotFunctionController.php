@@ -7,6 +7,7 @@ use App\Models\BotFunction;
 use App\Models\Organization;
 use App\Services\FunctionExecutionService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class BotFunctionController extends Controller
 {
@@ -136,6 +137,154 @@ class BotFunctionController extends Controller
                 ->with('error', 'Ошибка при создании функции: ' . $e->getMessage());
         }
     }
+
+    public function show(Organization $organization, Bot $bot, BotFunction $function)
+    {
+        // Проверяем, что функция принадлежит боту
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
+        }
+        
+        $function->load(['parameters', 'actions', 'behavior']);
+        
+        return view('functions.show', compact('organization', 'bot', 'function'));
+    }
+    
+    public function edit(Organization $organization, Bot $bot, BotFunction $function)
+    {
+        // Проверяем, что функция принадлежит боту
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
+        }
+        
+        $function->load(['parameters', 'actions', 'behavior']);
+        
+        // Получаем доступные CRM интеграции
+        $crmIntegrations = $bot->crmIntegrations()->where('crm_integrations.is_active', 1)->get();
+        
+        return view('functions.edit', compact('organization', 'bot', 'function', 'crmIntegrations'));
+    }
+    
+    public function update(Request $request, Organization $organization, Bot $bot, BotFunction $function)
+    {
+        // Проверяем, что функция принадлежит боту
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
+        }
+        
+        $validated = $request->validate([
+            'name' => 'required|string|regex:/^[a-z_]+$/|max:50',
+            'display_name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'trigger_type' => 'required|in:auto,manual,keyword',
+            'trigger_keywords' => 'nullable|array',
+            
+            // Параметры
+            'parameters' => 'nullable|array',
+            'parameters.*.code' => 'required|string|regex:/^[a-z_]+$/',
+            'parameters.*.name' => 'required|string',
+            'parameters.*.type' => 'required|in:string,number,boolean,date',
+            'parameters.*.description' => 'nullable|string',
+            'parameters.*.is_required' => 'boolean',
+            
+            // Действия
+            'actions' => 'required|array|min:1',
+            'actions.*.type' => 'required|string',
+            'actions.*.provider' => 'required|string',
+            'actions.*.config' => 'nullable|array',
+            'actions.*.config.field_mappings' => 'nullable|array',
+            'actions.*.config.field_mappings.*.crm_field' => 'nullable|string',
+            'actions.*.config.field_mappings.*.source_type' => 'nullable|string',
+            'actions.*.config.field_mappings.*.value' => 'nullable|string',
+            
+            // Поведение
+            'behavior.on_success' => 'required|in:continue,pause,enhance_prompt',
+            'behavior.on_error' => 'required|in:continue,pause,notify',
+            'behavior.success_message' => 'nullable|string',
+            'behavior.error_message' => 'nullable|string',
+            'behavior.prompt_enhancement' => 'nullable|string',
+        ]);
+        
+        DB::beginTransaction();
+        
+        try {
+            // Обновляем функцию
+            $function->update([
+                'name' => $validated['name'],
+                'display_name' => $validated['display_name'],
+                'description' => $validated['description'] ?? null,
+                'trigger_type' => $validated['trigger_type'],
+                'trigger_keywords' => $validated['trigger_keywords'] ?? [],
+            ]);
+            
+            // Удаляем старые параметры и создаем новые
+            $function->parameters()->delete();
+            if (!empty($validated['parameters'])) {
+                foreach ($validated['parameters'] as $index => $paramData) {
+                    $function->parameters()->create([
+                        'code' => $paramData['code'],
+                        'name' => $paramData['name'],
+                        'type' => $paramData['type'],
+                        'description' => $paramData['description'] ?? null,
+                        'is_required' => $paramData['is_required'] ?? false,
+                        'position' => $index,
+                    ]);
+                }
+            }
+            
+            // Удаляем старые действия и создаем новые
+            $function->actions()->delete();
+            foreach ($validated['actions'] as $index => $actionData) {
+                $function->actions()->create([
+                    'type' => $actionData['type'],
+                    'provider' => $actionData['provider'],
+                    'config' => $actionData['config'] ?? [],
+                    'position' => $index,
+                ]);
+            }
+            
+            // Обновляем поведение
+            $function->behavior()->updateOrCreate(
+                ['function_id' => $function->id],
+                $validated['behavior']
+            );
+            
+            DB::commit();
+            
+            return redirect()
+                ->route('functions.show', [$organization, $bot, $function])
+                ->with('success', 'Функция успешно обновлена');
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            return back()
+                ->withInput()
+                ->with('error', 'Ошибка при обновлении функции: ' . $e->getMessage());
+        }
+    }
+    
+    public function destroy(Organization $organization, Bot $bot, BotFunction $function)
+    {
+        // Проверяем, что функция принадлежит боту
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
+        }
+        
+        try {
+            $function->delete();
+            
+            return redirect()
+                ->route('functions.index', [$organization, $bot])
+                ->with('success', 'Функция успешно удалена');
+            
+        } catch (\Exception $e) {
+            return back()
+                ->with('error', 'Ошибка при удалении функции: ' . $e->getMessage());
+        }
+    }
+
+
     
     public function test(Request $request, Organization $organization, Bot $bot, BotFunction $function)
     {
@@ -159,5 +308,20 @@ class BotFunctionController extends Controller
         } catch (\Exception $e) {
             return back()->with('error', 'Ошибка выполнения: ' . $e->getMessage());
         }
+    }
+
+    public function executions(Organization $organization, Bot $bot, BotFunction $function)
+    {
+        // Проверяем, что функция принадлежит боту
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
+        }
+        
+        $executions = $function->executions()
+            ->with(['conversation'])
+            ->orderBy('created_at', 'desc')
+            ->paginate(20);
+        
+        return view('functions.executions', compact('organization', 'bot', 'function', 'executions'));
     }
 }

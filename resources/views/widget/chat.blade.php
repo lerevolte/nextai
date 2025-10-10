@@ -604,7 +604,7 @@
             }
             
             // Проверяем, нужно ли собирать контакты
-            const isNewUser = (!data.messages || data.messages.length === 0);
+            const isNewUser = (!data.messages || data.messages.length === 1);
             const needsContactInfo = /*state.botSettings.collect_contacts && */!state.userInfo && isNewUser;
             // console.log(state.botSettings);
             // console.log(state.userInfo)
@@ -702,12 +702,27 @@
             userInfoBadge.classList.add('show');
         }
         
+        // ИСПРАВЛЕНИЕ: Отправляем данные на сервер БЕЗ создания сообщения
+        try {
+            await fetch(`/widget/${state.botSlug}/update-user-info`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'X-CSRF-TOKEN': state.csrfToken 
+                },
+                body: JSON.stringify({ 
+                    session_id: state.sessionId,
+                    user_info: state.userInfo
+                })
+            });
+            
+            log('User info updated successfully');
+        } catch (error) {
+            log('ERROR: Failed to update user info', error);
+        }
+        
         // Запускаем поллинг
         startPolling();
-        
-        // Отправляем первое сообщение с контактными данными
-        const firstMessage = `Здравствуйте, меня зовут ${name}`;
-        await sendMessageWithUserInfo(firstMessage, state.userInfo);
     }
 
     function skipContactForm() {
@@ -720,41 +735,41 @@
         startPolling();
     }
 
-    async function sendMessageWithUserInfo(messageText, userInfo) {
-        // Добавляем сообщение пользователя в чат
-        addMessageToChat('user', messageText, new Date());
+    // async function sendMessageWithUserInfo(messageText, userInfo) {
+    //     // Добавляем сообщение пользователя в чат
+    //     addMessageToChat('user', messageText, new Date());
         
-        showTypingIndicator();
-        const sendButton = document.getElementById('sendButton');
-        if (sendButton) sendButton.disabled = true;
+    //     showTypingIndicator();
+    //     const sendButton = document.getElementById('sendButton');
+    //     if (sendButton) sendButton.disabled = true;
         
-        try {
-            const response = await fetch(`/widget/${state.botSlug}/message`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
-                body: JSON.stringify({ 
-                    message: messageText, 
-                    session_id: state.sessionId,
-                    user_info: userInfo
-                })
-            });
+    //     try {
+    //         const response = await fetch(`/widget/${state.botSlug}/message`, {
+    //             method: 'POST',
+    //             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': state.csrfToken },
+    //             body: JSON.stringify({ 
+    //                 message: messageText, 
+    //                 session_id: state.sessionId,
+    //                 user_info: userInfo
+    //             })
+    //         });
             
-            if (response.ok) {
-                const data = await response.json();
-                hideTypingIndicator();
-                if (data.message) {
-                    addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
-                    state.lastMessageId = data.message.id;
-                }
-            }
-        } catch (error) {
-            log('ERROR sending message with user info', error);
-            hideTypingIndicator();
-            addMessageToChat('assistant', 'Произошла ошибка. Пожалуйста, попробуйте еще раз.');
-        } finally {
-            if (sendButton) sendButton.disabled = false;
-        }
-    }
+    //         if (response.ok) {
+    //             const data = await response.json();
+    //             hideTypingIndicator();
+    //             if (data.message) {
+    //                 addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
+    //                 state.lastMessageId = data.message.id;
+    //             }
+    //         }
+    //     } catch (error) {
+    //         log('ERROR sending message with user info', error);
+    //         hideTypingIndicator();
+    //         addMessageToChat('assistant', 'Произошла ошибка. Пожалуйста, попробуйте еще раз.');
+    //     } finally {
+    //         if (sendButton) sendButton.disabled = false;
+    //     }
+    // }
 
     async function confirmDelivery(b24MessageIds) {
         if (!b24MessageIds || b24MessageIds.length === 0) {
@@ -816,10 +831,17 @@
             if (response.ok) {
                 const data = await response.json();
                 hideTypingIndicator();
-                if (data.message) {
+                if (data.status === 'operator_handling') {
+                    log('Message sent to operator, no bot response needed');
+                } else if (data.message) {
+                    // Обычный режим - добавляем ответ бота
                     addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
                     state.lastMessageId = data.message.id;
                 }
+                // if (data.message) {
+                //     addMessageToChat(data.message.role, data.message.content, new Date(data.message.created_at), data.message.id);
+                //     state.lastMessageId = data.message.id;
+                // }
             } else {
                 throw new Error('Failed to send message');
             }
@@ -873,6 +895,12 @@
                 const b24MessageIdsToConfirm = [];
 
                 data.messages.forEach(msg => {
+                    if (msg.role === 'user') {
+                        log(`Skipping user message ${msg.id} - already displayed by sendMessage()`);
+                        // Обновляем lastMessageId, но не отображаем сообщение
+                        state.lastMessageId = msg.id;
+                        return; // Пропускаем это сообщение
+                    }
                     addMessageToChat(msg.role, msg.content, new Date(msg.created_at), msg.id);
                     state.lastMessageId = msg.id;
 
