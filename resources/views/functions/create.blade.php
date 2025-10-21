@@ -154,6 +154,18 @@
             <div class="bg-white p-6 rounded-lg shadow-sm">
                 <h3 class="text-lg font-semibold text-gray-900">Параметры функции</h3>
                 <p class="text-sm text-gray-500 mt-1 mb-4">Определите данные, которые бот должен извлекать из диалога.</p>
+                <!-- В форме создания/редактирования функции -->
+                <div class="mt-4">
+                    <label class="flex items-center">
+                        <input type="checkbox" name="behavior[accumulate_parameters]" value="1"
+                               {{ old('behavior.accumulate_parameters', $function->behavior->accumulate_parameters ?? false) ? 'checked' : '' }}
+                               class="h-4 w-4 rounded border-gray-300 text-indigo-600">
+                        <span class="ml-2 text-sm text-gray-700">Накапливать параметры из нескольких сообщений</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1">
+                        Если включено, бот будет собирать параметры из нескольких сообщений пользователя до выполнения действия
+                    </p>
+                </div>
                 <div id="parametersContainer" class="space-y-4"></div>
                 <button type="button" onclick="addParameter()"
                         class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">

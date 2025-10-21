@@ -14,6 +14,11 @@ class FunctionBehavior extends Model
         'success_message',
         'error_message',
         'prompt_enhancement',
+        'accumulate_parameters'
+    ];
+    
+    protected $casts = [
+        'accumulate_parameters' => 'boolean',
     ];
 
     public function function(): BelongsTo

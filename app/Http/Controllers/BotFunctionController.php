@@ -66,6 +66,7 @@ class BotFunctionController extends Controller
             'behavior.success_message' => 'nullable|string',
             'behavior.error_message' => 'nullable|string',
             'behavior.prompt_enhancement' => 'nullable|string',
+            'behavior.accumulate_parameters' => 'boolean',
         ]);
         
         DB::beginTransaction();
@@ -187,15 +188,16 @@ class BotFunctionController extends Controller
             'parameters.*.description' => 'nullable|string',
             'parameters.*.is_required' => 'boolean',
             
-            // Действия
+            // Действия - исправляем структуру валидации
             'actions' => 'required|array|min:1',
             'actions.*.type' => 'required|string',
             'actions.*.provider' => 'required|string',
             'actions.*.config' => 'nullable|array',
-            'actions.*.config.field_mappings' => 'nullable|array',
-            'actions.*.config.field_mappings.*.crm_field' => 'nullable|string',
-            'actions.*.config.field_mappings.*.source_type' => 'nullable|string',
-            'actions.*.config.field_mappings.*.value' => 'nullable|string',
+            // Изменяем путь для field_mappings
+            'actions.*.field_mapping' => 'nullable|array', // Или используем этот путь
+            'actions.*.field_mapping.*.crm_field' => 'nullable|string',
+            'actions.*.field_mapping.*.source_type' => 'nullable|string',
+            'actions.*.field_mapping.*.value' => 'nullable|string',
             
             // Поведение
             'behavior.on_success' => 'required|in:continue,pause,enhance_prompt',
@@ -203,6 +205,7 @@ class BotFunctionController extends Controller
             'behavior.success_message' => 'nullable|string',
             'behavior.error_message' => 'nullable|string',
             'behavior.prompt_enhancement' => 'nullable|string',
+            'behavior.accumulate_parameters' => 'boolean',
         ]);
         
         DB::beginTransaction();
@@ -235,10 +238,37 @@ class BotFunctionController extends Controller
             // Удаляем старые действия и создаем новые
             $function->actions()->delete();
             foreach ($validated['actions'] as $index => $actionData) {
+                // Обрабатываем field_mapping правильно
+                $fieldMapping = [];
+                
+                // Проверяем оба возможных места для маппинга
+                if (!empty($actionData['field_mapping'])) {
+                    $fieldMapping = $actionData['field_mapping'];
+                } elseif (!empty($actionData['config']['field_mappings'])) {
+                    $fieldMapping = $actionData['config']['field_mappings'];
+                }
+                
+                // Очищаем пустые маппинги
+                $cleanFieldMapping = [];
+                foreach ($fieldMapping as $mapping) {
+                    if (!empty($mapping['crm_field'])) {
+                        $cleanFieldMapping[] = [
+                            'crm_field' => $mapping['crm_field'],
+                            'source_type' => $mapping['source_type'] ?? 'static',
+                            'value' => $mapping['value'] ?? ''
+                        ];
+                    }
+                }
+                
+                // Удаляем field_mappings из config если он там есть
+                $config = $actionData['config'] ?? [];
+                unset($config['field_mappings']);
+                
                 $function->actions()->create([
                     'type' => $actionData['type'],
                     'provider' => $actionData['provider'],
-                    'config' => $actionData['config'] ?? [],
+                    'config' => $config,
+                    'field_mapping' => $cleanFieldMapping,
                     'position' => $index,
                 ]);
             }
@@ -286,28 +316,15 @@ class BotFunctionController extends Controller
 
 
     
-    public function test(Request $request, Organization $organization, Bot $bot, BotFunction $function)
+    public function test(Organization $organization, Bot $bot, BotFunction $function)
     {
-        // Тестовое выполнение функции
-        $conversation = $bot->conversations()->latest()->first();
-        
-        if (!$conversation) {
-            return back()->with('error', 'Нет доступных диалогов для тестирования');
+        if ($function->bot_id !== $bot->id) {
+            abort(404);
         }
         
-        $message = $conversation->messages()->where('role', 'user')->latest()->first();
+        $function->load(['parameters', 'actions', 'behavior']);
         
-        if (!$message) {
-            return back()->with('error', 'Нет сообщений пользователя для тестирования');
-        }
-        
-        try {
-            $execution = $this->executionService->executeFunction($function, $message, $conversation);
-            
-            return back()->with('success', 'Функция выполнена успешно. ID выполнения: ' . $execution->id);
-        } catch (\Exception $e) {
-            return back()->with('error', 'Ошибка выполнения: ' . $e->getMessage());
-        }
+        return view('functions.test', compact('organization', 'bot', 'function'));
     }
 
     public function executions(Organization $organization, Bot $bot, BotFunction $function)

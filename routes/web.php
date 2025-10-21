@@ -144,10 +144,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
                     Route::get('/{function}/edit', [App\Http\Controllers\BotFunctionController::class, 'edit'])->name('functions.edit');
                     Route::put('/{function}', [App\Http\Controllers\BotFunctionController::class, 'update'])->name('functions.update');
                     Route::delete('/{function}', [App\Http\Controllers\BotFunctionController::class, 'destroy'])->name('functions.destroy');
-                    Route::post('/{function}/test', [App\Http\Controllers\BotFunctionController::class, 'test'])->name('functions.test');
+                    Route::get('/{function}/test', [App\Http\Controllers\BotFunctionController::class, 'test'])->name('functions.test');
                     Route::post('/{function}/toggle', [App\Http\Controllers\BotFunctionController::class, 'toggle'])->name('functions.toggle');
                     Route::get('/{function}/executions', [App\Http\Controllers\BotFunctionController::class, 'executions'])->name('functions.executions');
                 });
+
 
             });
             Route::prefix('bots/{bot}/knowledge')->middleware('bot.access')->group(function () {
@@ -377,6 +378,11 @@ Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
         // Получаем настройки коннектора из pivot таблицы
         $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
 }));
+Route::prefix('api/functions')->middleware(['auth:sanctum'])->group(function () {
+    Route::post('/test-conversation', [App\Http\Controllers\Api\FunctionTestController::class, 'createTestConversation'])->name('api.functions.test.conversation');
+    Route::post('/test-triggers', [App\Http\Controllers\Api\FunctionTestController::class, 'testTriggers'])->name('api.functions.test.triggers');
+    Route::post('/test-execute', [App\Http\Controllers\Api\FunctionTestController::class, 'testExecute'])->name('api.functions.test.execute');
+});
 // API роуты
 Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', function (Request $request) {
@@ -467,3 +473,36 @@ Route::any('/test/bitrix24-webhook', function(Request $request) {
     
     return response('OK - logged');
 })->withoutMiddleware(['web', 'csrf']);
+Route::get('/test/bitrix24-fields/{integrationId}', function($integrationId) {
+    $integration = \App\Models\CrmIntegration::find($integrationId);
+    
+    if (!$integration) {
+        return 'Integration not found';
+    }
+    
+    $provider = new \App\Services\CRM\Providers\Bitrix24Provider($integration);
+    
+    try {
+        // Тест подключения
+        $testResult = $provider->testConnection();
+        
+        // Получение полей
+        $fields = $provider->getFields('lead');
+        
+        return response()->json([
+            'connection_test' => $testResult,
+            'credentials' => [
+                'has_webhook' => !empty($integration->credentials['webhook_url']),
+                'has_oauth' => !empty($integration->credentials['auth_id']),
+                'webhook_url' => substr($integration->credentials['webhook_url'] ?? '', 0, 30) . '...',
+            ],
+            'fields_count' => count($fields),
+            'sample_fields' => array_slice($fields, 0, 3)
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+})->middleware('auth');

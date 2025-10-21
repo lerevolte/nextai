@@ -26,20 +26,37 @@ class Bitrix24Provider implements CrmProviderInterface
         $this->client = new Client([
             'timeout' => 30,
             'verify' => false,
+            'http_errors' => false, // Добавить это для лучшей обработки ошибок
         ]);
         
         $this->config = $integration->credentials ?? [];
 
-        // 1. Инициализируем вебхук, если он есть И не пустой
+        // Инициализация Webhook
         if (!empty($this->config['webhook_url'])) {
             $this->webhookUrl = rtrim($this->config['webhook_url'], '/') . '/';
+            Log::info('Bitrix24Provider: Webhook URL configured', [
+                'integration_id' => $integration->id,
+                'url_prefix' => substr($this->webhookUrl, 0, 30) . '...'
+            ]);
         }
         
-        // 2. Инициализируем OAuth ТОЛЬКО если ОБА поля заполнены
+        // Инициализация OAuth
         if (!empty($this->config['auth_id']) && !empty($this->config['domain'])) {
             $this->accessToken = $this->config['auth_id'];
             $this->refreshToken = $this->config['refresh_id'] ?? null;
             $this->oauthRestUrl = 'https://' . $this->config['domain'] . '/rest/';
+            Log::info('Bitrix24Provider: OAuth configured', [
+                'integration_id' => $integration->id,
+                'domain' => $this->config['domain']
+            ]);
+        }
+        
+        // Проверяем, что хотя бы один метод настроен
+        if (empty($this->webhookUrl) && empty($this->oauthRestUrl)) {
+            Log::error('Bitrix24Provider: No authentication method configured', [
+                'integration_id' => $integration->id,
+                'config_keys' => array_keys($this->config)
+            ]);
         }
     }
 
@@ -708,57 +725,88 @@ class Bitrix24Provider implements CrmProviderInterface
      */
     protected function makeRequest(string $method, array $params = []): array
     {
-        // --- ИСПРАВЛЕНИЕ: Улучшенная логика с явной обработкой ошибки токена и однократной попыткой обновления ---
-        $isOauth = !empty($this->oauthRestUrl) && !empty($this->accessToken);
-        $url = $isOauth ? ($this->oauthRestUrl . $method) : ($this->webhookUrl . $method);
-        info('makeRequest');
+        // Определяем, какой метод авторизации использовать
+        $url = null;
+        $useOauth = false;
+        
+        // Приоритет 1: OAuth если есть токен И домен
+        if (!empty($this->accessToken) && !empty($this->oauthRestUrl)) {
+            $url = $this->oauthRestUrl . $method;
+            $useOauth = true;
+            Log::info('Using OAuth for Bitrix24 request', [
+                'method' => $method,
+                'has_token' => !empty($this->accessToken),
+                'oauth_url' => $this->oauthRestUrl
+            ]);
+        }
+        // Приоритет 2: Webhook если есть URL
+        elseif (!empty($this->webhookUrl)) {
+            $url = $this->webhookUrl . $method;
+            Log::info('Using Webhook for Bitrix24 request', [
+                'method' => $method, 
+                'webhook_url' => $this->webhookUrl
+            ]);
+        }
+        
         if (!$url) {
+            Log::error('Bitrix24 makeRequest failed - no valid URL', [
+                'method' => $method,
+                'has_webhook' => !empty($this->webhookUrl),
+                'has_oauth' => !empty($this->oauthRestUrl),
+                'has_token' => !empty($this->accessToken)
+            ]);
             throw new \Exception('Bitrix24 integration is not configured');
         }
 
-        if ($isOauth) {
+        // Добавляем auth параметр только для OAuth
+        if ($useOauth) {
             $params['auth'] = $this->accessToken;
         }
 
         try {
-            info('API bitrix24');
-            info($url);
+            Log::info('Making Bitrix24 API request', [
+                'url' => $url,
+                'method' => $method,
+                'use_oauth' => $useOauth,
+                'params_count' => count($params)
+            ]);
+
             $response = $this->client->post($url, ['json' => $params]);
             $result = json_decode($response->getBody()->getContents(), true);
 
-            // Явно проверяем ошибку истекшего токена
-            if (isset($result['error']) && $result['error'] === 'expired_token') {
-                // Пытаемся обновить токен только если есть refresh_token
+            // Обработка ошибки токена только для OAuth
+            if ($useOauth && isset($result['error']) && $result['error'] === 'expired_token') {
                 if ($this->refreshToken) {
-                    Log::info('Bitrix24 token expired, attempting refresh.', ['integration_id' => $this->integration->id]);
-                    $this->refreshAccessToken(); // Этот метод обновит $this->accessToken
-
-                    // Повторяем запрос ОДИН раз с новым токеном
-                    Log::info('Retrying Bitrix24 API request with new token.');
-                    $params['auth'] = $this->accessToken; // Убедимся, что используем новый токен
-                    $retryUrl = $this->oauthRestUrl . $method; // После обновления всегда используем OAuth URL
+                    Log::info('Token expired, refreshing...');
+                    $this->refreshAccessToken();
                     
-                    $retryResponse = $this->client->post($retryUrl, ['json' => $params]);
-                    $finalResult = json_decode($retryResponse->getBody()->getContents(), true);
-
-                    if (!empty($finalResult['error'])) {
-                         throw new \Exception($finalResult['error_description'] ?? $finalResult['error']);
-                    }
-                    return $finalResult;
+                    // Повторяем запрос с новым токеном
+                    $params['auth'] = $this->accessToken;
+                    $response = $this->client->post($url, ['json' => $params]);
+                    $result = json_decode($response->getBody()->getContents(), true);
                 }
             }
 
             if (!empty($result['error'])) {
+                Log::error('Bitrix24 API error', [
+                    'method' => $method,
+                    'error' => $result['error'],
+                    'error_description' => $result['error_description'] ?? ''
+                ]);
                 throw new \Exception($result['error_description'] ?? $result['error']);
             }
+
+            Log::info('Bitrix24 API request successful', [
+                'method' => $method,
+                'has_result' => isset($result['result'])
+            ]);
 
             return $result;
 
         } catch (\Exception $e) {
             Log::error('Bitrix24 API request failed', [
                 'method' => $method,
-                'url_used' => $url,
-                'params_keys' => array_keys($params),
+                'url' => $url,
                 'error' => $e->getMessage(),
             ]);
             throw $e;

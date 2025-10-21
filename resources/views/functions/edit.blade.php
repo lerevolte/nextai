@@ -162,6 +162,18 @@
             <div class="bg-white p-6 rounded-lg shadow-sm">
                 <h3 class="text-lg font-semibold text-gray-900">Параметры функции</h3>
                 <p class="text-sm text-gray-500 mt-1 mb-4">Определите данные, которые бот должен извлекать из диалога.</p>
+                <!-- В форме создания/редактирования функции -->
+                <div class="mt-4">
+                    <label class="flex items-center">
+                        <input type="checkbox" name="behavior[accumulate_parameters]" value="1"
+                               {{ old('behavior.accumulate_parameters', $function->behavior->accumulate_parameters ?? false) ? 'checked' : '' }}
+                               class="h-4 w-4 rounded border-gray-300 text-indigo-600">
+                        <span class="ml-2 text-sm text-gray-700">Накапливать параметры из нескольких сообщений</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1">
+                        Если включено, бот будет собирать параметры из нескольких сообщений пользователя до выполнения действия
+                    </p>
+                </div>
                 <div id="parametersContainer" class="space-y-4"></div>
                 <button type="button" onclick="addParameter()"
                         class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
@@ -247,11 +259,14 @@
         ];
     })->toArray());
 
+    // ИСПРАВЛЕНИЕ: Добавляем field_mapping в config
     $existingActionsJson = old('actions', $function->actions->map(function($a) {
         return [
             'type' => $a->type,
             'provider' => $a->provider,
-            'config' => $a->config
+            'config' => array_merge($a->config ?? [], [
+                'field_mappings' => $a->field_mapping ?? [] // ВАЖНО: добавляем field_mapping в config
+            ])
         ];
     })->toArray());
 @endphp
@@ -338,10 +353,10 @@ function addAction(data = null) {
                     <select name="actions[${currentIndex}][provider]" id="actionProvider_${currentIndex}" onchange="updateActionType(this, ${currentIndex})" class="${selectClasses}">
                         <option value="">Выберите провайдера</option>
                         @foreach($crmIntegrations as $crm)
-                            <option value="{{ $crm->type }}">{{ $crm->name }}</option>
+                            <option value="{{ $crm->type }}" ${data && data.provider == '{{ $crm->type }}' ? 'selected' : ''}>{{ $crm->name }}</option>
                         @endforeach
-                        <option value="webhook">Webhook</option>
-                        <option value="email">Email</option>
+                        <option value="webhook" ${data && data.provider == 'webhook' ? 'selected' : ''}>Webhook</option>
+                        <option value="email" ${data && data.provider == 'email' ? 'selected' : ''}>Email</option>
                     </select>
                 </div>
                 <div>
@@ -365,8 +380,11 @@ function addAction(data = null) {
     if (data) {
         console.log('Initializing action with data:', currentIndex, data);
         
-        // Сохраняем конфиг глобально для доступа
-        window[`actionConfig_${currentIndex}`] = data.config;
+        // ВАЖНО: Сохраняем полные данные включая field_mapping
+        window[`actionConfig_${currentIndex}`] = {
+            ...data.config,
+            field_mappings: data.config?.field_mappings || []
+        };
         
         setTimeout(() => {
             const providerSelect = document.getElementById(`actionProvider_${currentIndex}`);
@@ -379,7 +397,7 @@ function addAction(data = null) {
                     if (typeSelect) {
                         typeSelect.value = data.type;
                         
-                        // Вызываем showActionConfig с передачей существующего конфига
+                        // Вызываем showActionConfig с правильными данными
                         showActionConfig(data.provider, data.type, currentIndex, data.config);
                     }
                 }, 300);
@@ -397,7 +415,6 @@ function restoreFieldMappings(actionIndex, mappings, config) {
     
     console.log('Restoring mappings to container', actionIndex, 'Mappings:', mappings);
     
-    // Очищаем контейнер
     container.innerHTML = '';
     
     if (!mappings || mappings.length === 0) {
@@ -406,18 +423,15 @@ function restoreFieldMappings(actionIndex, mappings, config) {
         return;
     }
     
-    // Добавляем каждый маппинг
     mappings.forEach((mapping, index) => {
         const fields = window.crmFields?.[actionIndex] || getDefaultFields('lead');
         const parameters = getAvailableParameters();
-        
-        console.log('Creating mapping', index, mapping, 'Available fields:', fields.length);
         
         const mappingHtml = `
             <div class="field-mapping-item" style="display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; background: #f9fafb; border-radius: 5px;">
                 <div style="flex: 1;">
                     <label style="font-size: 12px; color: #6b7280;">Поле CRM</label>
-                    <select name="actions[${actionIndex}][config][field_mappings][${index}][crm_field]" 
+                    <select name="actions[${actionIndex}][field_mapping][${index}][crm_field]" 
                             style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                         <option value="">Выберите поле</option>
                         ${fields.map(field => `
@@ -430,11 +444,13 @@ function restoreFieldMappings(actionIndex, mappings, config) {
                 
                 <div style="flex: 1;">
                     <label style="font-size: 12px; color: #6b7280;">Источник данных</label>
-                    <select name="actions[${actionIndex}][config][field_mappings][${index}][source_type]" 
+                    <select name="actions[${actionIndex}][field_mapping][${index}][source_type]" 
                             onchange="toggleValueInput(${actionIndex}, ${index}, this.value)"
                             style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                         <option value="parameter" ${mapping.source_type == 'parameter' ? 'selected' : ''}>Из параметра функции</option>
                         <option value="static" ${mapping.source_type == 'static' ? 'selected' : ''}>Статичное значение</option>
+                        <option value="dynamic" ${mapping.source_type == 'dynamic' ? 'selected' : ''}>Динамическое значение</option>
+                        <option value="conversation" ${mapping.source_type == 'conversation' ? 'selected' : ''}>Из диалога</option>
                     </select>
                 </div>
                 
@@ -456,27 +472,74 @@ function restoreFieldMappings(actionIndex, mappings, config) {
 }
 
 function getValueInputHTML(actionIndex, mappingIndex, sourceType, value, parameters) {
+    console.log('Generating value input', {
+        actionIndex,
+        mappingIndex,
+        sourceType,
+        value,
+        parametersCount: parameters.length
+    });
+    
     if (sourceType === 'static') {
         return `
             <label style="font-size: 12px; color: #6b7280;">Значение</label>
             <input type="text" 
-                   name="actions[${actionIndex}][config][field_mappings][${mappingIndex}][value]"
+                   name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
                    value="${value || ''}"
                    placeholder="Введите значение"
                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
         `;
-    } else {
+    } else if (sourceType === 'parameter') {
+        // Убираем фигурные скобки для сравнения
+        const cleanValue = (value || '').replace(/[{}]/g, '');
+        
         return `
             <label style="font-size: 12px; color: #6b7280;">Параметр</label>
-            <select name="actions[${actionIndex}][config][field_mappings][${mappingIndex}][value]"
+            <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                 <option value="">Выберите параметр</option>
                 ${parameters.map(param => `
-                    <option value="${param.code}" ${value == param.code ? 'selected' : ''}>${param.name} (${param.code})</option>
+                    <option value="{${param.code}}" ${cleanValue == param.code ? 'selected' : ''}>
+                        ${param.name} (${param.code})
+                    </option>
+                `).join('')}
+            </select>
+        `;
+    } else if (sourceType === 'dynamic') {
+        return `
+            <label style="font-size: 12px; color: #6b7280;">Выражение</label>
+            <input type="text" 
+                   name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                   value="${value || ''}"
+                   placeholder="Например: Заказ от {current_date}"
+                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+        `;
+    } else if (sourceType === 'conversation') {
+        const conversationFields = [
+            {value: '{conversation.id}', label: 'ID диалога'},
+            {value: '{conversation.user_name}', label: 'Имя пользователя'},
+            {value: '{conversation.user_email}', label: 'Email пользователя'},
+            {value: '{conversation.user_phone}', label: 'Телефон пользователя'},
+            {value: '{conversation.messages_count}', label: 'Количество сообщений'},
+            {value: '{conversation.channel}', label: 'Канал'},
+            {value: '{conversation.created_at}', label: 'Дата создания'}
+        ];
+        
+        return `
+            <label style="font-size: 12px; color: #6b7280;">Данные из диалога</label>
+            <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                <option value="">Выберите поле</option>
+                ${conversationFields.map(field => `
+                    <option value="${field.value}" ${value == field.value ? 'selected' : ''}>
+                        ${field.label}
+                    </option>
                 `).join('')}
             </select>
         `;
     }
+    
+    return '';
 }
 
 function removeDynamicItem(button, selector) {
@@ -934,62 +997,32 @@ function addFieldMapping(actionIndex) {
     
     container.insertAdjacentHTML('beforeend', mappingHtml);
 }
-
+function toggleValueInput(actionIndex, mappingIndex, sourceType) {
+    const valueDiv = document.getElementById(`valueInput_${actionIndex}_${mappingIndex}`);
+    const parameters = getAvailableParameters();
+    
+    console.log('Toggling value input', {
+        actionIndex,
+        mappingIndex,
+        sourceType,
+        parameters
+    });
+    
+    valueDiv.innerHTML = getValueInputHTML(actionIndex, mappingIndex, sourceType, '', parameters);
+}
 // Функция переключения типа значения
 function toggleValueInput(actionIndex, mappingIndex, sourceType) {
     const valueDiv = document.getElementById(`valueInput_${actionIndex}_${mappingIndex}`);
     const parameters = getAvailableParameters();
     
-    switch(sourceType) {
-        case 'static':
-            valueDiv.innerHTML = `
-                <label style="font-size: 12px; color: #6b7280;">Значение</label>
-                <input type="text" 
-                       name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
-                       placeholder="Введите значение"
-                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-            `;
-            break;
-            
-        case 'parameter':
-            valueDiv.innerHTML = `
-                <label style="font-size: 12px; color: #6b7280;">Параметр</label>
-                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
-                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <option value="">Выберите параметр</option>
-                    ${parameters.map(param => `
-                        <option value="{${param.code}}">${param.name} (${param.code})</option>
-                    `).join('')}
-                </select>
-            `;
-            break;
-            
-        case 'dynamic':
-            valueDiv.innerHTML = `
-                <label style="font-size: 12px; color: #6b7280;">Выражение</label>
-                <input type="text" 
-                       name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
-                       placeholder="Например: Заказ от {current_date}"
-                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-            `;
-            break;
-            
-        case 'conversation':
-            valueDiv.innerHTML = `
-                <label style="font-size: 12px; color: #6b7280;">Данные из диалога</label>
-                <select name="actions[${actionIndex}][field_mapping][${mappingIndex}][value]"
-                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <option value="{conversation.id}">ID диалога</option>
-                    <option value="{conversation.user_name}">Имя пользователя</option>
-                    <option value="{conversation.user_email}">Email пользователя</option>
-                    <option value="{conversation.user_phone}">Телефон пользователя</option>
-                    <option value="{conversation.messages_count}">Количество сообщений</option>
-                    <option value="{conversation.channel}">Канал</option>
-                    <option value="{conversation.created_at}">Дата создания</option>
-                </select>
-            `;
-            break;
-    }
+    console.log('Toggling value input', {
+        actionIndex,
+        mappingIndex,
+        sourceType,
+        parameters
+    });
+    
+    valueDiv.innerHTML = getValueInputHTML(actionIndex, mappingIndex, sourceType, '', parameters);
 }
 // Удаление маппинга поля
 function removeFieldMapping(button) {

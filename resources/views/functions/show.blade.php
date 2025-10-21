@@ -23,6 +23,10 @@
                style="padding: 10px 20px; background: #6366f1; color: white; text-decoration: none; border-radius: 5px;">
                 Редактировать
             </a>
+            <a href="{{ route('functions.test', [$organization, $bot, $function]) }}" 
+               style="padding: 10px 20px; background: #10b981; color: white; text-decoration: none; border-radius: 5px;">
+                🧪 Тестировать
+            </a>
             <a href="{{ route('functions.index', [$organization, $bot]) }}" 
                style="padding: 10px 20px; background: #e5e7eb; color: #374151; text-decoration: none; border-radius: 5px;">
                 К списку
