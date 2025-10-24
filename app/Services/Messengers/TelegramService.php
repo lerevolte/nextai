@@ -45,6 +45,11 @@ class TelegramService
 
             // Получаем или создаем диалог
             $conversation = $this->getOrCreateConversation($channel, $chatId, $userId, $userName);
+            
+            // НОВОЕ: Проверяем, первое ли это сообщение пользователя
+            $isFirstMessage = $conversation->messages()
+                ->where('role', 'user')
+                ->doesntExist();
 
             // Сохраняем сообщение пользователя
             $userMessage = $conversation->messages()->create([
@@ -52,8 +57,42 @@ class TelegramService
                 'content' => $text,
                 'metadata' => [
                     'telegram_message_id' => $message->getMessageId(),
+                    'from_telegram' => true,
                 ],
             ]);
+
+            // НОВОЕ: Если это первое сообщение и есть приветствие, отправляем его
+            $bot = $channel->bot;
+            if ($isFirstMessage && !empty($bot->welcome_message)) {
+                Log::info('Sending welcome message', [
+                    'bot_id' => $bot->id,
+                    'conversation_id' => $conversation->id,
+                    'chat_id' => $chatId
+                ]);
+                
+                try {
+                    $welcomeMsg = $telegram->sendMessage([
+                        'chat_id' => $chatId,
+                        'text' => $bot->welcome_message,
+                        'parse_mode' => 'Markdown',
+                    ]);
+                    
+                    // Сохраняем приветственное сообщение
+                    $conversation->messages()->create([
+                        'role' => 'assistant',
+                        'content' => $bot->welcome_message,
+                        'metadata' => [
+                            'telegram_message_id' => $welcomeMsg->getMessageId(),
+                            'is_welcome' => true,
+                        ],
+                    ]);
+                    
+                } catch (\Exception $e) {
+                    Log::error('Failed to send welcome message', [
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
 
             // Отправляем индикатор "печатает..."
             $telegram->sendChatAction([
@@ -61,8 +100,23 @@ class TelegramService
                 'action' => 'typing',
             ]);
 
+            // Проверяем статус диалога перед генерацией ответа
+            if ($conversation->status === 'waiting_operator') {
+                Log::info('Operator is handling conversation, skipping AI response', [
+                    'conversation_id' => $conversation->id,
+                    'chat_id' => $chatId
+                ]);
+                
+                // Можно отправить информационное сообщение
+                $telegram->sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '👤 С вами сейчас работает оператор.',
+                ]);
+                
+                return;
+            }
+
             // Генерируем ответ
-            $bot = $channel->bot;
             $responseContent = $this->aiService->generateResponse($bot, $conversation, $text);
 
             // Отправляем ответ
@@ -89,6 +143,7 @@ class TelegramService
             Log::error('Telegram webhook error: ' . $e->getMessage(), [
                 'channel_id' => $channel->id,
                 'data' => $data,
+                'trace' => $e->getTraceAsString(),
             ]);
         }
     }
@@ -99,11 +154,18 @@ class TelegramService
         
         switch ($command) {
             case '/start':
-                $telegram->sendMessage([
+                $replyMarkup = $this->getMainKeyboard($channel);
+                
+                $params = [
                     'chat_id' => $chatId,
                     'text' => $bot->welcome_message ?? "Здравствуйте! Я {$bot->name}. Чем могу помочь?",
-                    'reply_markup' => $this->getMainKeyboard($channel),
-                ]);
+                ];
+                
+                if ($replyMarkup) {
+                    $params['reply_markup'] = json_encode($replyMarkup);
+                }
+                
+                $telegram->sendMessage($params);
                 break;
                 
             case '/help':
@@ -152,11 +214,12 @@ class TelegramService
             $keyboard[] = $row;
         }
 
-        return json_encode([
+        // ИСПРАВЛЕНО: Возвращаем массив, а не JSON-строку
+        return [
             'keyboard' => $keyboard,
             'resize_keyboard' => true,
             'one_time_keyboard' => false,
-        ]);
+        ];
     }
 
     protected function getOrCreateConversation(Channel $channel, $chatId, $userId, $userName)

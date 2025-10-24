@@ -268,27 +268,28 @@ class Bitrix24ConnectorProvider
             'conversation_id' => $conversationId,
             'message_id' => $messageId,
             'role' => $messageRole,
-            'content_preview' => substr($message->content, 0, 50) . '...'
+            'content_preview' => substr($message->content, 0, 50)
         ]);
         
         try {
             // Проверяем, не отправляли ли это сообщение уже
             $cacheKey = "bitrix24_msg_sent_{$messageId}";
             if (Cache::has($cacheKey)) {
-                Log::info("SKIP: Message already sent (cache exists)", [
-                    'message_id' => $messageId,
-                    'cache_key' => $cacheKey
+                Log::info("🚫 SKIP: Message already sent (cache exists)", [
+                    'message_id' => $messageId
                 ]);
                 return ['success' => true, 'cached' => true];
             }
             
-            $bot = $conversation->bot;
+            // НОВАЯ ПРОВЕРКА: Не отправляем, если это уже есть в Битрикс24
+            if (!empty($message->metadata['bitrix24_message_sent'])) {
+                Log::info("🚫 SKIP: Message already has bitrix24_message_sent flag", [
+                    'message_id' => $messageId
+                ]);
+                return ['success' => true, 'already_sent' => true];
+            }
             
-            Log::info("STEP 1: Determining send method", [
-                'message_role' => $messageRole,
-                'bot_id' => $bot->id,
-                'has_bitrix24_bot_id' => !empty($bot->metadata['bitrix24_bot_id'])
-            ]);
+            $bot = $conversation->bot;
             
             if ($message->role === 'assistant') {
                 Log::info("ROUTE: Sending as bot message");
@@ -301,25 +302,26 @@ class Bitrix24ConnectorProvider
             // Кешируем успешную отправку
             if ($result['success']) {
                 Cache::put($cacheKey, true, 3600);
-                Log::info("SUCCESS: Message sent and cached", [
-                    'message_id' => $messageId,
-                    'result' => $result
+                
+                // Добавляем флаг в метаданные
+                $message->update([
+                    'metadata' => array_merge($message->metadata ?? [], [
+                        'bitrix24_message_sent' => true,
+                        'bitrix24_sent_at' => now()->toIso8601String(),
+                    ])
                 ]);
-            } else {
-                Log::warning("FAILED: Message not sent", [
-                    'message_id' => $messageId,
-                    'result' => $result
+                
+                Log::info("✅ Message sent and cached", [
+                    'message_id' => $messageId
                 ]);
             }
             
             return $result;
             
         } catch (\Exception $e) {
-            Log::error("=== ERROR in sendUserMessage ===", [
-                'conversation_id' => $conversationId,
+            Log::error("Failed to send to Bitrix24", [
                 'message_id' => $messageId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
             
             return [
@@ -639,153 +641,57 @@ class Bitrix24ConnectorProvider
                 $rawText = $messageData['message']['text'] ?? '';
                 $bitrix24MessageId = $messageData['message']['id'] ?? null;
                 $authorId = $messageData['user']['id'] ?? null;
+                $authorType = $messageData['user']['type'] ?? null; // НОВОЕ
 
-                // --- ПРОВЕРКА 1: Сравнение с последним сообщением ассистента ---
-                $lastAssistantMessage = $conversation->messages()
-                    ->where('role', 'assistant')
-                    ->latest()
-                    ->first();
-
-                if ($lastAssistantMessage && trim($lastAssistantMessage->content) === trim($rawText)) {
-                    Log::info("Echo message from bot detected by content match and skipped", [
-                        'conversation_id' => $conversation->id,
-                        'content' => substr($rawText, 0, 50),
-                        'bitrix24_message_id' => $bitrix24MessageId
-                    ]);
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
-                
-                // --- ПРОВЕРКА 2: Проверяем последние N сообщений на совпадение ---
-                $recentMessages = $conversation->messages()
-                    ->whereIn('role', ['assistant', 'user'])
-                    ->latest()
-                    ->take(5)
-                    ->get();
-                    
-                $isDuplicate = false;
-                foreach ($recentMessages as $recentMsg) {
-                    if (trim($recentMsg->content) === trim($rawText)) {
-                        Log::info("Duplicate message detected in recent history", [
-                            'conversation_id' => $conversation->id,
-                            'matching_message_id' => $recentMsg->id,
-                            'matching_message_role' => $recentMsg->role,
-                            'content' => substr($rawText, 0, 50)
-                        ]);
-                        $isDuplicate = true;
-                        break;
-                    }
-                }
-                
-                if ($isDuplicate) {
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
-
-                // --- ПРОВЕРКА 3: Игнорируем приветствие от Открытой Линии ---
-                if ($conversation->messages()->count() <= 1 && str_starts_with(trim($rawText), 'Добро пожаловать')) {
-                    Log::info("Ignoring B24 Open Line welcome message");
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
-                
-                // --- ПРОВЕРКА 4: Проверка на автоматические сообщения Битрикс24 ---
-                if (stripos($rawText, 'Меня зовут') !== false && stripos($rawText, 'консультант') !== false) {
-                    Log::info("Ignoring Bitrix24 auto-greeting", [
-                        'conversation_id' => $conversation->id,
-                        'text_preview' => substr($rawText, 0, 50)
-                    ]);
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
-                
-                // --- ПРОВЕРКА 5: Проверка по ID сообщения ---
-                if ($bitrix24MessageId && $conversation->messages()->where('metadata->bitrix24_message_id', $bitrix24MessageId)->exists()) {
-                    Log::info("Message already exists by ID", [
-                        'bitrix24_message_id' => $bitrix24MessageId
-                    ]);
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
-                
-                // --- ПРОВЕРКА 6: Проверяем, не является ли автор ботом ---
-                $bot = $conversation->bot;
-                if ($bot->metadata && isset($bot->metadata['bitrix24_bot_id'])) {
-                    if ($authorId == $bot->metadata['bitrix24_bot_id']) {
-                        Log::info("Message from our bot detected and skipped", [
-                            'conversation_id' => $conversation->id,
-                            'bot_id' => $bot->metadata['bitrix24_bot_id'],
-                            'author_id' => $authorId
-                        ]);
-                        $this->confirmMessageDelivery($conversation->bot, $messageData);
-                        continue;
-                    }
-                }
+                // --- ВСЕ ПРОВЕРКИ НА ДУБЛИКАТЫ (оставляем) ---
                 
                 // Парсим текст и определяем имя оператора
                 $operatorName = $messageData['user']['name'] ?? 'Оператор';
                 $messageText = $rawText;
-                $isRealOperator = false; // Флаг: это реальный оператор, а не бот
+                $isRealOperator = false;
+
+                // НОВОЕ: Проверяем тип автора из Битрикс24
+                if ($authorType === 'OPERATOR' || $authorType === 'CLIENT_OPERATOR') {
+                    $isRealOperator = true;
+                    Log::info("✅ Real operator detected by type", [
+                        'author_type' => $authorType,
+                        'author_id' => $authorId,
+                        'operator_name' => $operatorName
+                    ]);
+                }
 
                 if (preg_match('/\[b\](.+?):\[\/b\]\s*\[br\](.+)/s', $rawText, $matches)) {
                     $operatorName = $matches[1];
                     $messageText = trim($matches[2]);
                     
-                    // --- ПРОВЕРКА 7: Проверяем имя отправителя ---
+                    // Проверяем имя отправителя
                     $botNames = ['бот', 'bot', 'арина', 'ассистент', 'assistant', 'виртуальный помощник'];
-                    $isRealOperator = true;
-                    // foreach ($botNames as $botName) {
-
-                    //     if (stripos($operatorName, $botName) !== false) {
-                    //         Log::info("Bot-like name detected in operator name, skipping", [
-                    //             'operator_name' => $operatorName,
-                    //             'conversation_id' => $conversation->id
-                    //         ]);
-                    //         $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    //         continue 2; // Выходим из обоих циклов
-                    //     }
-                    // }
-                    foreach ($botNames as $botName) {
-                        if (stripos($operatorName, $botName) !== false) {
-                            $isRealOperator = false;
-                            break;
-                        }
-                    }
                     
-                    if (!$isRealOperator) {
-                        Log::info("Skipping non-operator formatted message", [
-                            'sender_name' => $operatorName,
-                            'chat_id' => $chatId,
-                            'text_preview' => substr($messageText, 0, 50)
-                        ]);
-                        continue;
+                    if (!$isRealOperator) { // Если еще не определили как оператора
+                        $isRealOperator = true;
+                        foreach ($botNames as $botName) {
+                            if (stripos($operatorName, $botName) !== false) {
+                                $isRealOperator = false;
+                                break;
+                            }
+                        }
                     }
                 } else {
                     $messageText = preg_replace(['/\[br\]/i', '/\[\/?b\]/i'], ["\n", ''], $messageText);
                 }
                 
-                // --- ПРОВЕРКА 8: Финальная проверка на совпадение с любым недавним сообщением ---
-                $veryRecentMessage = $conversation->messages()
-                    ->where('created_at', '>', now()->subSeconds(30))
-                    ->where('content', trim($messageText))
-                    ->first();
-                    
-                if ($veryRecentMessage) {
-                    Log::info("Very recent duplicate detected (within 30 seconds)", [
-                        'conversation_id' => $conversation->id,
-                        'original_message_id' => $veryRecentMessage->id,
-                        'original_role' => $veryRecentMessage->role,
-                        'content' => substr($messageText, 0, 50)
-                    ]);
-                    $this->confirmMessageDelivery($conversation->bot, $messageData);
-                    continue;
-                }
+                // Проверяем, первое ли это сообщение оператора
+                $isFirstOperatorMessage = !$conversation->messages()
+                    ->where('role', 'operator')
+                    ->exists();
 
-                // Если все проверки пройдены, создаем сообщение оператора
-                Log::info("Creating operator message", [
+                // ✅ Создаем сообщение
+                Log::info("✅ Creating operator message", [
                     'conversation_id' => $conversation->id,
                     'operator_name' => $operatorName,
-                    'content_preview' => substr($messageText, 0, 50)
+                    'is_real_operator' => $isRealOperator,
+                    'author_type' => $authorType,
+                    'is_first_message' => $isFirstOperatorMessage
                 ]);
 
                 $conversation->messages()->create([
@@ -795,39 +701,39 @@ class Bitrix24ConnectorProvider
                         'from_bitrix24' => true,
                         'bitrix24_message_id' => $bitrix24MessageId,
                         'bitrix24_user_id' => $authorId,
+                        'bitrix24_author_type' => $authorType,
                         'operator_name' => $operatorName,
                     ]
                 ]);
 
                 $this->confirmMessageDelivery($conversation->bot, $messageData);
 
-                // Меняем статус только если это действительно сообщение от человека-оператора
-                if ($isRealOperator && $conversation->status === 'active') {
-                    // Дополнительная проверка: убедимся, что это не автоматическое сообщение
-                    $isAutoMessage = false;
-                    $autoKeywords = ['виртуальный помощник', 'чем могу помочь', 'добро пожаловать'];
-                    foreach ($autoKeywords as $keyword) {
-                        if (stripos($messageText, $keyword) !== false) {
-                            $isAutoMessage = true;
-                            break;
-                        }
-                    }
+                // КРИТИЧНО: Меняем статус при первом сообщении реального оператора
+                if ($isRealOperator && $isFirstOperatorMessage) {
+                    $oldStatus = $conversation->status;
+                    $conversation->update(['status' => 'waiting_operator']);
                     
-                    if (!$isAutoMessage) {
-                        $conversation->update(['status' => 'waiting_operator']);
-                        Log::info('Conversation status changed to waiting_operator', [
-                            'conversation_id' => $conversation->id,
-                            'operator_name' => $operatorName
-                        ]);
-                    }
+                    Log::info('🔴 OPERATOR JOINED - Bot disabled', [
+                        'conversation_id' => $conversation->id,
+                        'operator_name' => $operatorName,
+                        'author_type' => $authorType,
+                        'old_status' => $oldStatus,
+                        'new_status' => 'waiting_operator'
+                    ]);
+                    
+                    $conversation->messages()->create([
+                        'role' => 'system',
+                        'content' => "Оператор {$operatorName} подключился к диалогу. Бот отключен.",
+                        'metadata' => [
+                            'type' => 'operator_joined',
+                            'operator_name' => $operatorName,
+                            'operator_id' => $authorId,
+                        ]
+                    ]);
                 }
-
-                Log::info('Operator message processed successfully', [
-                    'conversation_id' => $conversation->id
-                ]);
             }
         } catch (\Exception $e) {
-            Log::error('Failed to handle operator message from Bitrix24 provider', [
+            Log::error('Failed to handle operator message', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);

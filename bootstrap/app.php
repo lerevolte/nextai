@@ -26,5 +26,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withCommands([
         \App\Console\Commands\GenerateEmbeddings::class,
+        \App\Console\Commands\SyncConversationStatuses::class,
     ])
     ->create();
