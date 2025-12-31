@@ -1,0 +1,508 @@
+<?php
+
+use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\BotController;
+use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\ConversationController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\KnowledgeBaseController;
+use App\Http\Controllers\OrganizationController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\WebhookController;
+use App\Http\Controllers\WidgetController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\KnowledgeSourceController;
+use App\Http\Controllers\AbTestController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\PerformanceController;
+use App\Http\Controllers\BillingController;
+use App\Http\Controllers\BotFunctionController;
+use App\Models\Bot;
+use Illuminate\Support\Facades\Route;
+
+// Публичные роуты
+Route::get('/', function () {
+    return view('welcome');
+})->name('home');
+
+// Виджет чата (публичный)
+Route::prefix('widget')->group(function () {
+    Route::get('/{bot:slug}', [WidgetController::class, 'show'])->name('widget.show');
+    Route::post('/{bot:slug}/initialize', [WidgetController::class, 'initialize'])->name('widget.initialize');
+    Route::post('/{bot:slug}/message', [WidgetController::class, 'sendMessage'])->name('widget.message');
+    Route::post('/{bot:slug}/end', [WidgetController::class, 'endConversation'])->name('widget.end');
+    Route::post('/{bot:slug}/poll', [WidgetController::class, 'pollMessages'])->name('widget.poll');
+    Route::post('/{bot:slug}/confirm-delivery', [WidgetController::class, 'confirmDelivery'])->name('widget.confirm-delivery');
+    Route::post('/{bot:slug}/update-user-info', [WidgetController::class, 'updateUserInfo'])->name('widget.update-user-info');
+});
+
+
+// API для виджета (альтернативный вариант)
+Route::prefix('api/widget')->group(function () {
+    Route::post('/{bot:slug}/message', [WidgetController::class, 'sendMessage']);
+    Route::get('/{bot:slug}/history', [WidgetController::class, 'getHistory']);
+    Route::post('/{bot:slug}/feedback', [WidgetController::class, 'submitFeedback']);
+});
+
+// Вебхуки для мессенджеров
+Route::prefix('webhooks')->group(function () {
+    Route::post('/telegram/{channel}', [WebhookController::class, 'telegram'])->name('webhooks.telegram');
+    Route::post('/whatsapp/{channel}', [WebhookController::class, 'whatsapp']);
+    Route::post('/vk/{channel}', [WebhookController::class, 'vk']);
+});
+Route::post('/webhooks/bitrix24/openline', function(Request $request) {
+    Log::info('Bitrix24 openline webhook received', $request->all());
+    
+    // Обрабатываем сообщение от оператора
+    app(\App\Services\Bitrix24\Bitrix24AppService::class)->handleOpenlineWebhook($request->all());
+    
+    return response('OK');
+})->withoutMiddleware(['web', 'csrf']);
+
+
+// Аутентификация
+Route::middleware('guest')->group(function () {
+    Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [LoginController::class, 'login']);
+    Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->name('register');
+    Route::post('/register', [RegisterController::class, 'register']);
+});
+
+Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
+
+// Защищенные роуты
+Route::middleware(['auth', 'verified'])->group(function () {
+    // Dashboard
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+    
+    // Организация
+    Route::prefix('organization')->group(function () {
+        Route::get('/settings', [OrganizationController::class, 'settings'])->name('organization.settings');
+        Route::put('/settings', [OrganizationController::class, 'update'])->name('organization.update');
+        Route::post('/regenerate-api-key', [OrganizationController::class, 'regenerateApiKey'])
+            ->name('organization.regenerate-api-key');
+        // Пользователи
+        Route::group([
+            'prefix' => 'users',
+            // 'middleware' => [function (Illuminate\Http\Request $request, $next) {
+            //     if (!auth()->user()->hasRole(['owner', 'admin'])) {
+            //         abort(403, 'У вас нет прав для управления пользователями');
+            //     }
+            //     return $next($request);
+            // }]
+        ],function () {
+                Route::get('/', [UserController::class, 'index'])->name('organization.users.index');
+                Route::get('/create', [UserController::class, 'create'])->name('organization.users.create');
+                Route::post('/', [UserController::class, 'store'])->name('organization.users.store');
+                Route::get('/{user}/edit', [UserController::class, 'edit'])->name('organization.users.edit');
+                Route::put('/{user}', [UserController::class, 'update'])->name('organization.users.update');
+                Route::delete('/{user}', [UserController::class, 'destroy'])->name('organization.users.destroy');
+            });
+
+    });
+
+    // Боты
+    Route::middleware(['organization.access'])->group(function () {
+        Route::prefix('o/{organization:slug}')->group(function () {
+            Route::resource('bots', BotController::class);
+            Route::post('/bots/{bot}/regenerate-api-key', [BotController::class, 'regenerateApiKey'])->name('bots.regenerate-api-key');
+            
+            // Каналы бота
+            Route::prefix('bots/{bot}')->middleware('bot.access')->group(function () {
+                Route::resource('channels', ChannelController::class);
+                
+                // База знаний
+                Route::get('/knowledge', [KnowledgeBaseController::class, 'index'])->name('knowledge.index');
+                Route::get('/knowledge/create', [KnowledgeBaseController::class, 'create'])->name('knowledge.create');
+                Route::post('/knowledge', [KnowledgeBaseController::class, 'store'])->name('knowledge.store');
+                Route::get('/knowledge/{item}/edit', [KnowledgeBaseController::class, 'edit'])->name('knowledge.edit');
+                Route::put('/knowledge/{item}', [KnowledgeBaseController::class, 'update'])->name('knowledge.update');
+                Route::delete('/knowledge/{item}', [KnowledgeBaseController::class, 'destroy'])->name('knowledge.destroy');
+                Route::get('/knowledge/{item}/versions', [KnowledgeBaseController::class, 'versions'])->name('knowledge.versions');
+                Route::post('/knowledge/{item}/restore-version', [KnowledgeBaseController::class, 'restoreVersion'])->name('knowledge.versions.restore');
+                Route::post('/knowledge/{item}/versions/compare', [KnowledgeBaseController::class, 'compareVersions'])->name('knowledge.versions.compare');
+                Route::delete('/knowledge/{item}/versions/{version}/delete', [KnowledgeBaseController::class, 'deleteVersion'])->name('knowledge.versions.delete');
+                // Диалоги
+                Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
+                Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
+                Route::post('/conversations/{conversation}', [ConversationController::class, 'sendMessage'])->name('conversations.message');
+                Route::get('/conversations/{conversation}/export', [ConversationController::class, 'export'])->name('conversations.export');
+                Route::post('/conversations/{conversation}/takeover', [ConversationController::class, 'takeover'])->name('conversations.takeover');
+                Route::post('/conversations/{conversation}/close', [ConversationController::class, 'close'])->name('conversations.close');
+                Route::post('/conversations/{conversation}/return-to-bot', [ConversationController::class, 'returnToBot'])->name('conversations.return-to-bot');
+
+                Route::prefix('functions')->group(function () {
+                    Route::get('/', [App\Http\Controllers\BotFunctionController::class, 'index'])->name('functions.index');
+                    Route::get('/create', [App\Http\Controllers\BotFunctionController::class, 'create'])->name('functions.create');
+                    Route::post('/', [App\Http\Controllers\BotFunctionController::class, 'store'])->name('functions.store');
+                    Route::get('/{function}', [App\Http\Controllers\BotFunctionController::class, 'show'])->name('functions.show');
+                    Route::get('/{function}/edit', [App\Http\Controllers\BotFunctionController::class, 'edit'])->name('functions.edit');
+                    Route::put('/{function}', [App\Http\Controllers\BotFunctionController::class, 'update'])->name('functions.update');
+                    Route::delete('/{function}', [App\Http\Controllers\BotFunctionController::class, 'destroy'])->name('functions.destroy');
+                    Route::get('/{function}/test', [App\Http\Controllers\BotFunctionController::class, 'test'])->name('functions.test');
+                    Route::post('/{function}/toggle', [App\Http\Controllers\BotFunctionController::class, 'toggle'])->name('functions.toggle');
+                    Route::get('/{function}/executions', [App\Http\Controllers\BotFunctionController::class, 'executions'])->name('functions.executions');
+                });
+
+
+            });
+            Route::prefix('bots/{bot}/knowledge')->middleware('bot.access')->group(function () {
+                Route::get('/sources', [KnowledgeSourceController::class, 'index'])->name('knowledge.sources.index');
+                Route::get('/sources/create', [KnowledgeSourceController::class, 'create'])->name('knowledge.sources.create');
+                Route::post('/sources', [KnowledgeSourceController::class, 'store'])->name('knowledge.sources.store');
+                Route::post('/sources/{source}/sync', [KnowledgeSourceController::class, 'sync'])->name('knowledge.sources.sync');
+                Route::delete('/sources/{source}', [KnowledgeSourceController::class, 'destroy'])->name('knowledge.sources.destroy');
+                Route::get('/knowledge/sources/{source}/logs', [KnowledgeSourceController::class, 'logs'])->name('knowledge.sources.logs');
+
+
+                Route::get('/import', [KnowledgeSourceController::class, 'import'])->name('knowledge.import');
+                Route::post('/import', [KnowledgeSourceController::class, 'processImport'])->name('knowledge.import.process');
+            });
+
+            Route::prefix('crm')->group(function () {
+                Route::get('/', [App\Http\Controllers\CrmIntegrationController::class, 'index'])->name('crm.index');
+                Route::get('/create', [App\Http\Controllers\CrmIntegrationController::class, 'create'])->name('crm.create');
+                Route::post('/', [App\Http\Controllers\CrmIntegrationController::class, 'store'])->name('crm.store');
+                Route::get('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'show'])->name('crm.show');
+                Route::get('/{integration}/edit', [App\Http\Controllers\CrmIntegrationController::class, 'edit'])->name('crm.edit');
+                Route::get('/{integration}/load-pipelines', [App\Http\Controllers\CrmIntegrationController::class, 'loadPipelines'])->name('crm.load-pipelines');
+                Route::put('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'update'])->name('crm.update');
+                Route::delete('/{integration}', [App\Http\Controllers\CrmIntegrationController::class, 'destroy'])->name('crm.destroy');
+                Route::post('/{integration}/test', [App\Http\Controllers\CrmIntegrationController::class, 'test'])->name('crm.test');
+                
+                // API методы
+                Route::post('/{integration}/test-connection', [App\Http\Controllers\CrmIntegrationController::class, 'testConnection'])->name('crm.test-connection');
+                Route::post('/{integration}/sync-conversation', [App\Http\Controllers\CrmIntegrationController::class, 'syncConversation'])->name('crm.sync-conversation');
+                Route::post('/{integration}/bulk-sync', [App\Http\Controllers\CrmIntegrationController::class, 'bulkSync'])->name('crm.bulk-sync');
+                Route::get('/{integration}/fields', [App\Http\Controllers\CrmIntegrationController::class, 'getFields'])->name('crm.fields');
+                Route::get('/{integration}/users', [App\Http\Controllers\CrmIntegrationController::class, 'getUsers'])->name('crm.users');
+                Route::get('/{integration}/pipelines', [App\Http\Controllers\CrmIntegrationController::class, 'getPipelines'])->name('crm.pipelines');
+                Route::post('/{integration}/export', [App\Http\Controllers\CrmIntegrationController::class, 'export'])->name('crm.export');
+                
+                // Настройки бота
+                Route::get('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'botSettings'])->name('crm.bot-settings');
+                Route::put('/{integration}/bot/{bot}', [App\Http\Controllers\CrmIntegrationController::class, 'updateBotSettings'])->name('crm.bot-settings.update');
+
+                // Salebot специфичные методы
+                Route::group([
+                    'prefix' => '/{integration}/salebot',
+                    'middleware' => [function (Request $request, $next) {
+                        $integration = $request->route('integration');
+                        // Проверяем, что модель была найдена и ее тип соответствует 'salebot'
+                        if (!$integration || $integration->type !== 'salebot') {
+                            abort(404);
+                        }
+                        return $next($request);
+                    }]
+                ], function () {
+                    Route::get('/funnels', [App\Http\Controllers\SalebotController::class, 'getFunnels'])->name('crm.salebot.funnels');
+                    Route::get('/funnel-blocks', [App\Http\Controllers\SalebotController::class, 'getFunnelBlocks'])->name('crm.salebot.funnel-blocks');
+                    Route::post('/start-funnel', [App\Http\Controllers\SalebotController::class, 'startFunnel'])->name('crm.salebot.start-funnel');
+                    Route::post('/stop-funnel', [App\Http\Controllers\SalebotController::class, 'stopFunnel'])->name('crm.salebot.stop-funnel');
+                    Route::post('/transfer-operator', [App\Http\Controllers\SalebotController::class, 'transferToOperator'])->name('crm.salebot.transfer-operator');
+                    Route::post('/broadcast', [App\Http\Controllers\SalebotController::class, 'broadcast'])->name('crm.salebot.broadcast');
+                    Route::get('/funnel-stats', [App\Http\Controllers\SalebotController::class, 'getFunnelStats'])->name('crm.salebot.funnel-stats');
+                    Route::post('/create-variable', [App\Http\Controllers\SalebotController::class, 'createVariable'])->name('crm.salebot.create-variable');
+                    Route::get('/bots', [App\Http\Controllers\SalebotController::class, 'getBots'])->name('crm.salebot.bots');
+                    Route::post('/sync-variables', [App\Http\Controllers\SalebotController::class, 'syncClientVariables'])->name('crm.salebot.sync-variables');
+                });
+            });
+
+            // Улучшенный дашборд
+            Route::get('/analytics', [DashboardController::class, 'index'])->name('analytics.index');
+            Route::get('/analytics/refresh', [DashboardController::class, 'refreshMetrics'])->name('analytics.refresh');
+            Route::post('/analytics/export', [DashboardController::class, 'exportMetrics'])->name('analytics.export');
+            
+            // A/B тестирование
+            Route::prefix('ab-tests')->group(function () {
+                Route::get('/', [AbTestController::class, 'index'])->name('ab-tests.index');
+                Route::get('/create', [AbTestController::class, 'create'])->name('ab-tests.create');
+                Route::post('/', [AbTestController::class, 'store'])->name('ab-tests.store');
+                Route::get('/{test}', [AbTestController::class, 'show'])->name('ab-tests.show');
+                Route::get('/{test}/analysis', [AbTestController::class, 'analysis'])->name('ab-tests.analysis');
+                Route::post('/{test}/complete', [AbTestController::class, 'complete'])->name('ab-tests.complete');
+                Route::post('/{test}/pause', [AbTestController::class, 'pause'])->name('ab-tests.pause');
+                Route::delete('/{test}', [AbTestController::class, 'destroy'])->name('ab-tests.destroy');
+            });
+            
+            // Отчеты
+            Route::prefix('reports')->group(function () {
+                Route::get('/', [ReportController::class, 'index'])->name('reports.index');
+                Route::post('/generate', [ReportController::class, 'generate'])->name('reports.generate');
+                Route::get('/scheduled', [ReportController::class, 'scheduled'])->name('reports.scheduled');
+                Route::post('/schedule', [ReportController::class, 'schedule'])->name('reports.schedule');
+                Route::get('/download/{report}', [ReportController::class, 'download'])->name('reports.download');
+                Route::delete('/scheduled/{report}', [ReportController::class, 'deleteScheduled'])->name('reports.scheduled.delete');
+            });
+            
+            // Мониторинг производительности
+            Route::prefix('performance')->group(function () {
+                Route::get('/', [PerformanceController::class, 'index'])->name('performance.index');
+                Route::get('/metrics', [PerformanceController::class, 'metrics'])->name('performance.metrics');
+                Route::post('/optimize', [PerformanceController::class, 'optimize'])->name('performance.optimize');
+                Route::get('/recommendations', [PerformanceController::class, 'recommendations'])->name('performance.recommendations');
+            });
+
+        });
+    });
+
+
+});
+Route::prefix('webhooks/crm')->group(function () {
+    Route::post('/{type}', [App\Http\Controllers\CrmIntegrationController::class, 'webhook'])->name('webhooks.crm');
+});
+
+Route::prefix('webhooks/crm/bitrix24/connector')->group(function () {
+    // Обработчик настройки коннектора (вызывается из Битрикс24 при подключении)
+    Route::post('/settings', [App\Http\Controllers\Bitrix24ConnectorController::class, 'settings'])
+        ->name('webhooks.bitrix24.connector.settings')
+        ->withoutMiddleware(['web', 'csrf']);
+    
+    // Обработчик событий от коннектора (сообщения от операторов)
+    Route::post('/handler', [App\Http\Controllers\Bitrix24ConnectorController::class, 'handler'])
+        ->name('webhooks.bitrix24.connector.handler')
+        ->withoutMiddleware(['web', 'csrf']);
+});
+Route::get('/test/check-events/{integrationId}', function($integrationId) {
+    $integration = \App\Models\CrmIntegration::find($integrationId);
+    if (!$integration) {
+        return 'Integration not found';
+    }
+    
+    $appService = app(\App\Services\Bitrix24\Bitrix24AppService::class);
+    $events = $appService->checkRegisteredEvents($integration);
+    
+    return response()->json([
+        'registered_events' => $events,
+        'expected_handler' => url('/bitrix24/event-handler')
+    ]);
+})->middleware('auth');
+// API для управления коннектором (защищенные)
+Route::middleware(['auth'])->prefix('api/crm/bitrix24/connector')->group(function () {
+    // Регистрация коннектора для бота
+    Route::post('/register', [App\Http\Controllers\Bitrix24ConnectorController::class, 'register'])
+        ->name('api.bitrix24.connector.register');
+    
+    // Отмена регистрации коннектора
+    Route::post('/unregister', [App\Http\Controllers\Bitrix24ConnectorController::class, 'unregister'])
+        ->name('api.bitrix24.connector.unregister');
+});
+
+Route::prefix('bitrix24')->withoutMiddleware(['web', 'csrf'])->group(function () {
+    // Установка приложения
+     Route::match(['GET', 'POST'], '/install', [App\Http\Controllers\Bitrix24AppController::class, 'install'])
+        ->name('bitrix24.install');
+    
+    // Главная страница приложения (iframe). Также разрешаем GET и POST.
+    Route::match(['GET', 'POST'], '/', [App\Http\Controllers\Bitrix24AppController::class, 'index'])
+        ->name('bitrix24.index');
+    
+    // Регистрация коннектора
+    Route::post('/register-connector', [App\Http\Controllers\Bitrix24AppController::class, 'registerConnector'])
+        ->name('bitrix24.register-connector');
+    Route::post('/unregister-connector', [App\Http\Controllers\Bitrix24AppController::class, 'unregisterConnector'])->name('bitrix24.unregisterConnector');
+    
+    // Активация коннектора (PLACEMENT_HANDLER)
+    Route::post('/activate-connector', [App\Http\Controllers\Bitrix24AppController::class, 'activateConnector'])
+        ->name('bitrix24.activate-connector');
+    
+    // Обработчик событий
+    Route::post('/event-handler', [App\Http\Controllers\Bitrix24AppController::class, 'eventHandler'])
+        ->name('bitrix24.event-handler');
+    Route::post('/check-connector-status', [App\Http\Controllers\Bitrix24AppController::class, 'checkConnectorStatus'])
+        ->name('bitrix24.check-connector-status');
+
+    Route::post('/login', [App\Http\Controllers\Bitrix24AppController::class, 'login'])
+        ->name('bitrix24.login')
+        ->middleware(['web']); // Нужна сессия для авторизации
+        
+    Route::post('/register', [App\Http\Controllers\Bitrix24AppController::class, 'register'])
+        ->name('bitrix24.register')
+        ->middleware(['web']);
+        
+    Route::post('/link-api', [App\Http\Controllers\Bitrix24AppController::class, 'linkByApiKey'])
+        ->name('bitrix24.link-api')
+        ->middleware(['web']);
+
+    Route::post('/register-bot', [App\Http\Controllers\Bitrix24AppController::class, 'registerBot'])
+        ->name('bitrix24.register-bot');
+    Route::post('/bot-handler', [App\Http\Controllers\Bitrix24AppController::class, 'botHandler'])
+        ->name('bitrix24.bot-handler');
+    Route::post('/bot-welcome', [App\Http\Controllers\Bitrix24AppController::class, 'botWelcome'])
+        ->name('bitrix24.bot-welcome');
+    Route::post('/bot-delete', [App\Http\Controllers\Bitrix24AppController::class, 'botDelete'])
+        ->name('bitrix24.bot-delete');
+});
+// Биллинг и тарифы
+Route::prefix('billing')->middleware(['auth'])->group(function () {
+    Route::get('/tariffs', [BillingController::class, 'tariffs'])->name('billing.tariffs');
+    Route::get('/balance', [BillingController::class, 'balance'])->name('billing.balance');
+    Route::get('/deposit', [BillingController::class, 'deposit'])->name('billing.deposit');
+    Route::post('/deposit', [BillingController::class, 'createPayment'])->name('billing.payment.create');
+    Route::post('/subscribe/{tariff}', [BillingController::class, 'subscribe'])->name('billing.subscribe');
+    Route::post('/cancel-subscription', [BillingController::class, 'cancelSubscription'])->name('billing.cancel');
+    Route::get('/payments', [BillingController::class, 'payments'])->name('billing.payments');
+    Route::get('/payment/success', [BillingController::class, 'paymentSuccess'])->name('billing.payment.success');
+});
+
+Route::post('/webhook/{key}', [App\Http\Controllers\Api\WebhookController::class, 'handle'])
+    ->name('webhook.handle');
+Route::prefix('api/functions')->middleware(['auth:sanctum'])->group(function () {
+    Route::post('/test-triggers', [App\Http\Controllers\Api\FunctionTestController::class, 'testTriggers']);
+    Route::post('/test-execute', [App\Http\Controllers\Api\FunctionTestController::class, 'testExecute']);
+});
+// Webhook ЮКассы (без авторизации)
+Route::post('/yookassa/webhook', [BillingController::class, 'webhook'])
+    ->name('yookassa.webhook')
+    ->withoutMiddleware(['web', 'csrf']);
+// Route::any('/bitrix24/{any}', function(Request $request, $any) {
+//    Log::channel('bitrix24')->info('Catch-all route hit', [
+//        'path' => $any,
+//        'data' => $request->all()
+//    ]);
+//    return response('OK');
+// })->where('any', '.*')->withoutMiddleware(['web', 'csrf']);
+ Route::get('/test', (function(){
+    $integration = \App\Models\CrmIntegration::find(11);
+    dd($integration->settings);
+    $botIntegration = $integration->bots()
+            ->where('bot_id', 1)
+            ->first();
+    dd($botIntegration->pivot);
+    echo $botIntegration->id;
+        // Получаем настройки коннектора из pivot таблицы
+        $connectorSettings = json_decode($botIntegration->pivot->connector_settings, true) ?? [];
+}));
+Route::prefix('api/functions')->middleware(['auth:sanctum'])->group(function () {
+    Route::post('/test-conversation', [App\Http\Controllers\Api\FunctionTestController::class, 'createTestConversation'])->name('api.functions.test.conversation');
+    Route::post('/test-triggers', [App\Http\Controllers\Api\FunctionTestController::class, 'testTriggers'])->name('api.functions.test.triggers');
+    Route::post('/test-execute', [App\Http\Controllers\Api\FunctionTestController::class, 'testExecute'])->name('api.functions.test.execute');
+});
+// API роуты
+Route::prefix('api')->middleware(['auth:sanctum'])->group(function () {
+    Route::get('/user', function (Request $request) {
+        return $request->user();
+    });
+    
+    // API для ботов
+    Route::prefix('bots/{bot}')->middleware('bot.access')->group(function () {
+        Route::get('/stats', [BotController::class, 'stats']);
+        Route::post('/message', [BotController::class, 'processMessage']);
+        Route::get('/conversations', [ConversationController::class, 'apiIndex']);
+        Route::get('/conversations/{conversation}/messages', [ConversationController::class, 'messages']);
+    });
+    Route::get('bots/{bot}/intents', function (Bot $bot) {
+        return response()->json([
+            'intents' => $bot->intents()->where('is_active', true)->get()
+        ]);
+    });
+
+    // CRM Fields API
+    Route::prefix('crm')->group(function () {
+        Route::get('/fields/{provider}/{entityType}', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getFields'])
+            ->name('api.crm.fields');
+            
+        Route::get('/{provider}/lead-statuses', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getLeadStatuses'])
+            ->name('api.crm.lead-statuses');
+            
+        Route::get('/{provider}/users', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getUsers'])
+            ->name('api.crm.users');
+            
+        Route::get('/{provider}/lead-sources', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getLeadSources'])
+            ->name('api.crm.lead-sources');
+        Route::get('/{provider}/pipelines', 
+            [App\Http\Controllers\Api\CrmFieldsController::class, 'getPipelineStages'])
+            ->name('api.crm.pipeline-stages');
+    });
+});
+Route::get('/test/bitrix24-events/{botId}', function($botId) {
+    echo url('/webhooks/crm/bitrix24/connector/handler');
+    die();
+    $bot = \App\Models\Bot::find($botId);
+    if (!$bot) {
+        return 'Bot not found';
+    }
+
+    $integration = $bot->organization->crmIntegrations()
+        ->where('type', 'bitrix24')->first();
+
+    if (!$integration) {
+        return 'Integration not found for this bot';
+    }
+    
+    $appService = app(\App\Services\Bitrix24\Bitrix24AppService::class);
+    
+    try {
+        Log::info("Attempting to unregister connector for bot #{$botId}");
+        // Сначала полностью удаляем старую регистрацию из Битрикс24
+        $appService->unregisterConnector($integration, $bot);
+        
+        Log::info("Attempting to re-register connector for bot #{$botId}");
+        // Теперь регистрируем заново с правильными обработчиками
+        $result = $appService->registerConnector($integration, $bot);
+        
+        Log::info("Re-registration result", ['result' => $result]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Bot handlers have been reset. Please check if messaging works now.',
+            'result' => $result
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Manual bot fix failed', ['error' => $e->getMessage()]);
+        return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+    }
+})->middleware('auth');
+Route::any('/test/bitrix24-webhook', function(Request $request) {
+    Log::info('=== TEST: Bitrix24 webhook received ===', [
+        'method' => $request->method(),
+        'url' => $request->fullUrl(),
+        'all_data' => $request->all(),
+        'headers' => $request->headers->all()
+    ]);
+    
+    return response('OK - logged');
+})->withoutMiddleware(['web', 'csrf']);
+Route::get('/test/bitrix24-fields/{integrationId}', function($integrationId) {
+    $integration = \App\Models\CrmIntegration::find($integrationId);
+    
+    if (!$integration) {
+        return 'Integration not found';
+    }
+    
+    $provider = new \App\Services\CRM\Providers\Bitrix24Provider($integration);
+    
+    try {
+        // Тест подключения
+        $testResult = $provider->testConnection();
+        
+        // Получение полей
+        $fields = $provider->getFields('lead');
+        
+        return response()->json([
+            'connection_test' => $testResult,
+            'credentials' => [
+                'has_webhook' => !empty($integration->credentials['webhook_url']),
+                'has_oauth' => !empty($integration->credentials['auth_id']),
+                'webhook_url' => substr($integration->credentials['webhook_url'] ?? '', 0, 30) . '...',
+            ],
+            'fields_count' => count($fields),
+            'sample_fields' => array_slice($fields, 0, 3)
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+})->middleware('auth');

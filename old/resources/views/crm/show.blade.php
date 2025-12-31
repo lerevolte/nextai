@@ -1,0 +1,674 @@
+@extends('layouts.app')
+
+@section('title', $integration->name)
+
+@section('content')
+<div class="py-12">
+    <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+        <!-- Header -->
+        <div class="bg-white shadow-sm rounded-lg mb-6">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center">
+                        <span class="text-3xl mr-3">{!! $integration->getIcon() !!}</span>
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-900">{{ $integration->name }}</h1>
+                            <p class="text-gray-500">{{ $integration->getTypeName() }}</p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button onclick="testConnection()" 
+                                class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
+                            🔌 Тест подключения
+                        </button>
+                        <a href="{{ route('crm.edit', [$organization, $integration]) }}" 
+                           class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                            ⚙️ Настройки
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm font-medium text-gray-500">Статус</div>
+                <div class="mt-1">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium {{ $integration->is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
+                        {{ $integration->is_active ? '✅ Активна' : '❌ Неактивна' }}
+                    </span>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm font-medium text-gray-500">Всего синхронизаций</div>
+                <div class="mt-1 text-3xl font-semibold text-gray-900">{{ $stats['total_syncs'] ?? 0 }}</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm font-medium text-gray-500">Успешных</div>
+                <div class="mt-1 text-3xl font-semibold text-green-600">{{ $stats['successful_syncs'] ?? 0 }}</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm font-medium text-gray-500">Ошибок</div>
+                <div class="mt-1 text-3xl font-semibold text-red-600">{{ $stats['failed_syncs'] ?? 0 }}</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="bg-white shadow rounded-lg">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8 px-6" aria-label="Tabs">
+                    <a href="#bots" class="tab-link active border-indigo-500 text-indigo-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                        🤖 Подключенные боты
+                    </a>
+                    <a href="#entities" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                        📊 Синхронизированные объекты
+                    </a>
+                    <a href="#logs" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                        📝 Журнал синхронизации
+                    </a>
+                    <a href="#settings" class="tab-link border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                        ⚙️ Настройки
+                    </a>
+                </nav>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="p-6">
+                <!-- Bots Tab -->
+                <div id="bots-content" class="tab-content">
+                    <div class="mb-4 flex justify-between items-center">
+                        <h3 class="text-lg font-medium">Подключенные боты</h3>
+                        <button onclick="showAddBotModal()" 
+                                class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+                            + Добавить бота
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        @forelse($integration->bots as $bot)
+                            <div class="border rounded-lg p-4">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <h4 class="font-medium text-gray-900">{{ $bot->name }}</h4>
+                                        <div class="mt-2 text-sm text-gray-500 space-y-1">
+                                            <div>
+                                                ✅ Синхронизация контактов: 
+                                                <span class="font-medium">{{ $bot->pivot->sync_contacts ? 'Да' : 'Нет' }}</span>
+                                            </div>
+                                            <div>
+                                                💬 Синхронизация диалогов: 
+                                                <span class="font-medium">{{ $bot->pivot->sync_conversations ? 'Да' : 'Нет' }}</span>
+                                            </div>
+                                            <div>
+                                                📋 Создание лидов: 
+                                                <span class="font-medium">{{ $bot->pivot->create_leads ? 'Да' : 'Нет' }}</span>
+                                            </div>
+                                            <div>
+                                                💰 Создание сделок: 
+                                                <span class="font-medium">{{ $bot->pivot->create_deals ? 'Да' : 'Нет' }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex space-x-2">
+                                        <a href="{{ route('crm.bot-settings', [$organization, $integration, $bot]) }}" 
+                                           class="text-indigo-600 hover:text-indigo-900">
+                                            Настроить
+                                        </a>
+                                        <button onclick="removeBotConnection({{ $bot->id }})" 
+                                                class="text-red-600 hover:text-red-900">
+                                            Удалить
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        @empty
+                            <p class="text-gray-500">Нет подключенных ботов</p>
+                        @endforelse
+                    </div>
+                </div>
+
+                <!-- Entities Tab -->
+                <div id="entities-content" class="tab-content hidden">
+                    <div class="mb-4">
+                        <h3 class="text-lg font-medium">Синхронизированные объекты</h3>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Тип</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Локальный ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID в CRM</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Последняя синхронизация</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                @forelse($integration->syncEntities as $entity)
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="px-2 py-1 text-xs rounded-full bg-gray-100">
+                                                {{ ucfirst($entity->entity_type) }}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            #{{ $entity->local_id }}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            @if($entity->getRemoteUrl())
+                                                <a href="{{ $entity->getRemoteUrl() }}" target="_blank" 
+                                                   class="text-indigo-600 hover:text-indigo-900">
+                                                    {{ $entity->remote_id }} ↗
+                                                </a>
+                                            @else
+                                                {{ $entity->remote_id }}
+                                            @endif
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {{ $entity->last_synced_at ? $entity->last_synced_at->diffForHumans() : 'Никогда' }}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <button onclick="syncEntity('{{ $entity->entity_type }}', '{{ $entity->local_id }}')"
+                                                    class="text-indigo-600 hover:text-indigo-900">
+                                                Синхронизировать
+                                            </button>
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">
+                                            Нет синхронизированных объектов
+                                        </td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div id="logs-content" class="tab-content hidden">
+                    <div class="mb-4 flex justify-between items-center">
+                        <h3 class="text-lg font-medium">Журнал синхронизации</h3>
+                        <button onclick="refreshLogs()" class="text-indigo-600 hover:text-indigo-900">
+                            🔄 Обновить
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-2">
+                        @forelse($integration->syncLogs as $log)
+                            <div class="flex items-start space-x-3 p-3 {{ $log->status == 'error' ? 'bg-red-50' : 'bg-gray-50' }} rounded-lg">
+                                <div class="flex-shrink-0">
+                                    @if($log->status == 'success')
+                                        <span class="text-green-500">✓</span>
+                                    @else
+                                        <span class="text-red-500">✗</span>
+                                    @endif
+                                </div>
+                                <div class="flex-1">
+                                    <div class="text-sm">
+                                        <span class="font-medium">{{ $log->getActionName() }}</span>
+                                        <span class="text-gray-500">{{ $log->getEntityTypeName() }}</span>
+                                        <span class="text-gray-400">{{ $log->getDirectionIcon() }}</span>
+                                    </div>
+                                    @if($log->error_message)
+                                        <div class="text-xs text-red-600 mt-1">{{ $log->error_message }}</div>
+                                    @endif
+                                    <div class="text-xs text-gray-400 mt-1">
+                                        {{ $log->created_at->format('d.m.Y H:i:s') }}
+                                    </div>
+                                </div>
+                            </div>
+                        @empty
+                            <p class="text-gray-500 text-center py-4">Журнал пуст</p>
+                        @endforelse
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="settings-content" class="tab-content hidden">
+                    <div class="space-y-6">
+                        @if($integration->type == 'bitrix24')
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-900 mb-4">Настройки Битрикс24</h4>
+                                
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm text-gray-700">Webhook URL</label>
+                                        <div class="mt-1">
+                                            <input type="text" readonly 
+                                                   value="{{ substr($integration->credentials['webhook_url'] ?? '', 0, 50) }}..." 
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                                        </div>
+                                    </div>
+                                    
+                                    @if($integration->settings['openline_config_id'] ?? null)
+                                    <div>
+                                        <label class="block text-sm text-gray-700">ID открытой линии</label>
+                                        <div class="mt-1">
+                                            <input type="text" readonly 
+                                                   value="{{ $integration->settings['openline_config_id'] }}" 
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                                        </div>
+                                    </div>
+                                    @endif
+                                    
+                                    <div class="p-4 bg-blue-50 rounded-lg">
+                                        <h5 class="font-medium text-blue-900 mb-2">Webhook для Битрикс24</h5>
+                                        <p class="text-sm text-blue-700 mb-2">
+                                            Добавьте этот URL в обработчики событий Битрикс24:
+                                        </p>
+                                        <code class="block p-2 bg-white rounded text-xs">
+                                            {{ url('/webhooks/crm/bitrix24') }}
+                                        </code>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                                <h5 class="font-medium text-blue-900 mb-4">Настройка коннектора открытых линий</h5>
+                                
+                                <div class="space-y-4">
+                                    <!-- Статус коннектора для каждого бота -->
+                                    @foreach($integration->bots as $bot)
+                                    <div class="p-4 bg-white rounded border {{ $bot->metadata['bitrix24_connector_registered'] ?? false ? 'border-green-300' : 'border-gray-300' }}">
+                                        <div class="flex justify-between items-center">
+                                            <div>
+                                                <h6 class="font-medium">{{ $bot->name }}</h6>
+                                                <p class="text-sm text-gray-600">
+                                                    ID коннектора: <code class="px-1 bg-gray-100 rounded">chatbot_{{ $bot->organization_id }}_{{ $bot->id }}</code>
+                                                </p>
+                                                @if($bot->metadata['bitrix24_connector_registered'] ?? false)
+                                                    <p class="text-sm text-green-600 mt-1">
+                                                        ✅ Коннектор зарегистрирован
+                                                    </p>
+                                                @else
+                                                    <p class="text-sm text-orange-600 mt-1">
+                                                        ⚠️ Коннектор не зарегистрирован
+                                                    </p>
+                                                @endif
+                                            </div>
+                                            
+                                            <div class="flex space-x-2">
+                                                @if(!($bot->metadata['bitrix24_connector_registered'] ?? false))
+                                                    <button onclick="registerConnector({{ $bot->id }})" 
+                                                            class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                                                        Зарегистрировать
+                                                    </button>
+                                                @else
+                                                    <button onclick="unregisterConnector({{ $bot->id }})" 
+                                                            class="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                                                        Удалить регистрацию
+                                                    </button>
+                                                @endif
+                                            </div>
+                                        </div>
+                                    </div>
+                                    @endforeach
+                                </div>
+                                
+                                <div class="mt-4 p-4 bg-blue-100 rounded">
+                                    <h6 class="font-medium text-blue-900 mb-2">Инструкция по подключению:</h6>
+                                    <ol class="list-decimal list-inside text-sm text-blue-800 space-y-1">
+                                        <li>Нажмите "Зарегистрировать" для нужного бота</li>
+                                        <li>Перейдите в Битрикс24: <strong>CRM → Клиенты → Контакт-центр</strong></li>
+                                        <li>Найдите блок с названием вашего бота</li>
+                                        <li>Нажмите "Подключить"</li>
+                                        <li>Выберите нужную открытую линию</li>
+                                        <li>Дождитесь сообщения "successfully"</li>
+                                    </ol>
+                                </div>
+                                
+                                <div class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded">
+                                    <h6 class="font-medium text-yellow-900 mb-2">⚠️ Важно:</h6>
+                                    <ul class="list-disc list-inside text-sm text-yellow-800 space-y-1">
+                                        <li>Каждый бот должен быть зарегистрирован отдельно</li>
+                                        <li>После регистрации коннектор появится в Контакт-центре Битрикс24</li>
+                                        <li>Один бот может быть подключен только к одной открытой линии</li>
+                                        <li>При удалении регистрации все активные подключения будут разорваны</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <script>
+                            function registerConnector(botId) {
+                                if (!confirm('Зарегистрировать коннектор для этого бота?')) {
+                                    return;
+                                }
+                                
+                                fetch('/api/crm/bitrix24/connector/register', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                        'Accept': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        bot_id: botId,
+                                        integration_id: {{ $integration->id }}
+                                    })
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        alert('✅ ' + data.message);
+                                        location.reload();
+                                    } else {
+                                        alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error:', error);
+                                    alert('❌ Ошибка при регистрации коннектора');
+                                });
+                            }
+
+                            function unregisterConnector(botId) {
+                                if (!confirm('Удалить регистрацию коннектора? Все активные подключения будут разорваны.')) {
+                                    return;
+                                }
+                                
+                                fetch('/api/crm/bitrix24/connector/unregister', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                        'Accept': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        bot_id: botId,
+                                        integration_id: {{ $integration->id }}
+                                    })
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        alert('✅ ' + data.message);
+                                        location.reload();
+                                    } else {
+                                        alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error:', error);
+                                    alert('❌ Ошибка при удалении регистрации');
+                                });
+                            }
+                            </script>
+
+                        @elseif($integration->type == 'salebot')
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-900 mb-4">Настройки Salebot</h4>
+                                
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm text-gray-700">API ключ</label>
+                                        <div class="mt-1">
+                                            <input type="password" readonly 
+                                                   value="••••••••••••" 
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm text-gray-700">ID бота</label>
+                                        <div class="mt-1">
+                                            <input type="text" readonly 
+                                                   value="{{ $integration->credentials['bot_id'] ?? '' }}" 
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="p-4 bg-purple-50 rounded-lg">
+                                        <h5 class="font-medium text-purple-900 mb-2">Webhook для Salebot</h5>
+                                        <p class="text-sm text-purple-700 mb-2">
+                                            Используйте этот URL в настройках webhook вашего бота:
+                                        </p>
+                                        <code class="block p-2 bg-white rounded text-xs">
+                                            {{ url('/webhooks/crm/salebot') }}
+                                        </code>
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+
+                        <div class="pt-6 border-t">
+                            <!-- <h4 class="text-sm font-medium text-gray-900 mb-4">Опасная зона</h4> -->
+                            <button onclick="deleteIntegration()" 
+                                    class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-700">
+                                Удалить интеграцию
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@push('scripts')
+<script>
+// Tab switching
+document.querySelectorAll('.tab-link').forEach(link => {
+    link.addEventListener('click', function(e) {
+        e.preventDefault();
+        
+        document.querySelectorAll('.tab-link').forEach(tab => {
+            tab.classList.remove('border-indigo-500', 'text-indigo-600');
+            tab.classList.add('border-transparent', 'text-gray-500');
+        });
+        
+        this.classList.remove('border-transparent', 'text-gray-500');
+        this.classList.add('border-indigo-500', 'text-indigo-600');
+        
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.add('hidden');
+        });
+        
+        const targetId = this.getAttribute('href').substring(1) + '-content';
+        document.getElementById(targetId).classList.remove('hidden');
+    });
+});
+
+function testConnection() {
+    fetch('{{ route("crm.test-connection", [$organization, $integration]) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(data.success ? '✅ Подключение успешно!' : '❌ Ошибка подключения: ' + data.message);
+    });
+}
+
+function syncEntity(entityType, localId) {
+    fetch('{{ route("crm.sync-conversation", [$organization, $integration]) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            conversation_id: localId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ Синхронизация выполнена');
+            location.reload();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    });
+}
+
+function deleteIntegration() {
+    if (confirm('Вы уверены? Это действие нельзя отменить!')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{{ route("crm.destroy", [$organization, $integration]) }}';
+        
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = '_token';
+        csrfInput.value = '{{ csrf_token() }}';
+        form.appendChild(csrfInput);
+        
+        const methodInput = document.createElement('input');
+        methodInput.type = 'hidden';
+        methodInput.name = '_method';
+        methodInput.value = 'DELETE';
+        form.appendChild(methodInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function refreshLogs() {
+    location.reload();
+}
+
+function showAddBotModal() {
+    // Создаем модальное окно
+    const modal = document.createElement('div');
+    modal.id = 'addBotModal';
+    modal.className = 'fixed inset-0 z-50 overflow-y-auto';
+    modal.innerHTML = `
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeAddBotModal()"></div>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <form method="POST" action="{{ route('crm.update', [$organization, $integration]) }}">
+                    @csrf
+                    @method('PUT')
+                    <input type="hidden" name="name" value="{{ $integration->name }}">
+                    <input type="hidden" name="is_active" value="{{ $integration->is_active ? '1' : '0' }}">
+                    
+                    <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">
+                            Добавить бота к интеграции
+                        </h3>
+                        <div class="space-y-2">
+                            @php
+                                $availableBots = $organization->bots()->whereNotIn('id', $integration->bots->pluck('id'))->get();
+                            @endphp
+                            @forelse($availableBots as $bot)
+                                <label class="flex items-center p-2 hover:bg-gray-50 rounded">
+                                    <input type="checkbox" name="bot_ids[]" value="{{ $bot->id }}" 
+                                           class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                    <span class="ml-2">{{ $bot->name }}</span>
+                                </label>
+                            @empty
+                                <p class="text-gray-500 text-sm">Все боты уже подключены к этой интеграции</p>
+                            @endforelse
+                            
+                            @foreach($integration->bots as $bot)
+                                <input type="hidden" name="bot_ids[]" value="{{ $bot->id }}">
+                            @endforeach
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                        <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm">
+                            Добавить
+                        </button>
+                        <button type="button" onclick="closeAddBotModal()" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                            Отмена
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeAddBotModal() {
+    const modal = document.getElementById('addBotModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function removeBotConnection(botId) {
+    if (!confirm('Удалить подключение этого бота к интеграции?')) {
+        return;
+    }
+    
+    // Создаем форму для отправки
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ route("crm.update", [$organization, $integration]) }}';
+    
+    // CSRF token
+    const csrfToken = document.createElement('input');
+    csrfToken.type = 'hidden';
+    csrfToken.name = '_token';
+    csrfToken.value = '{{ csrf_token() }}';
+    form.appendChild(csrfToken);
+    
+    // Method override
+    const methodInput = document.createElement('input');
+    methodInput.type = 'hidden';
+    methodInput.name = '_method';
+    methodInput.value = 'PUT';
+    form.appendChild(methodInput);
+    
+    // Name
+    const nameInput = document.createElement('input');
+    nameInput.type = 'hidden';
+    nameInput.name = 'name';
+    nameInput.value = '{{ $integration->name }}';
+    form.appendChild(nameInput);
+    
+    // Is active
+    const activeInput = document.createElement('input');
+    activeInput.type = 'hidden';
+    activeInput.name = 'is_active';
+    activeInput.value = '{{ $integration->is_active ? "1" : "0" }}';
+    form.appendChild(activeInput);
+    
+    // Bot IDs (все кроме удаляемого)
+    @foreach($integration->bots as $bot)
+        if ({{ $bot->id }} !== botId) {
+            const botInput = document.createElement('input');
+            botInput.type = 'hidden';
+            botInput.name = 'bot_ids[]';
+            botInput.value = '{{ $bot->id }}';
+            form.appendChild(botInput);
+        }
+    @endforeach
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function syncEntity(entityType, localId) {
+    fetch('{{ route("crm.sync-conversation", [$organization, $integration]) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            conversation_id: localId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ Синхронизация выполнена');
+            location.reload();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    });
+}
+</script>
+@endpush
+@endsection
