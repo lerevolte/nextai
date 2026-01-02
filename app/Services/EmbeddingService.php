@@ -2,28 +2,43 @@
 
 namespace App\Services;
 
-use OpenAI\Laravel\Facades\OpenAI;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 
 class EmbeddingService
 {
+    protected ?string $proxyUrl;
+    protected string $apiKey;
+    protected string $baseUrl;
+
+    public function __construct()
+    {
+        $this->proxyUrl = config('chatbot.proxy_url');
+        $this->apiKey = config('openai.api_key', '');
+        $this->baseUrl = config('openai.base_url', 'https://api.openai.com/v1');
+    }
+
     /**
      * Генерирует эмбеддинг для текста
      */
     public function generateEmbedding(string $text): ?array
     {
         try {
-            // Ограничиваем длину текста (OpenAI имеет лимит)
+            // Ограничиваем длину текста (OpenAI имеет лимит ~8191 токенов)
             $text = mb_substr($text, 0, 8000);
             
-            // Используем OpenAI для генерации эмбеддингов
-            $response = OpenAI::embeddings()->create([
+            // Используем HTTP клиент с прокси
+            $response = $this->makeOpenAIRequest('embeddings', [
                 'model' => 'text-embedding-ada-002',
                 'input' => $text,
             ]);
 
-            return $response->embeddings[0]->embedding;
+            if (isset($response['data'][0]['embedding'])) {
+                return $response['data'][0]['embedding'];
+            }
+
+            Log::error('Invalid embedding response structure', ['response' => $response]);
+            return $this->generateSimpleEmbedding($text);
             
         } catch (\Exception $e) {
             Log::error('Failed to generate embedding: ' . $e->getMessage());
@@ -31,6 +46,36 @@ class EmbeddingService
             // Fallback: генерируем простой эмбеддинг на основе TF-IDF
             return $this->generateSimpleEmbedding($text);
         }
+    }
+
+    /**
+     * Выполняет запрос к OpenAI API с поддержкой прокси
+     */
+    protected function makeOpenAIRequest(string $endpoint, array $data): array
+    {
+        $url = rtrim($this->baseUrl, '/') . '/' . $endpoint;
+
+        $httpClient = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->apiKey,
+            'Content-Type' => 'application/json',
+        ])->timeout(60);
+
+        // Добавляем прокси если настроен
+        if (!empty($this->proxyUrl)) {
+            $httpClient = $httpClient->withOptions([
+                'proxy' => $this->proxyUrl,
+                'verify' => false,
+            ]);
+        }
+
+        $response = $httpClient->post($url, $data);
+
+        if (!$response->successful()) {
+            $error = $response->json('error.message', $response->body());
+            throw new \Exception("OpenAI API error: {$error}");
+        }
+
+        return $response->json();
     }
 
     /**
@@ -43,10 +88,9 @@ class EmbeddingService
         $wordCount = array_count_values($words);
         
         // Создаем вектор фиксированной длины
-        $embedding = array_fill(0, 384, 0); // Используем 384 размерность для совместимости
+        $embedding = array_fill(0, 384, 0);
         
         foreach ($wordCount as $word => $count) {
-            // Простой хэш для определения позиции в векторе
             $position = abs(crc32($word)) % 384;
             $embedding[$position] += $count / count($words);
         }
@@ -110,6 +154,16 @@ class EmbeddingService
                 continue;
             }
 
+            // Проверяем совместимость размерностей
+            if (count($queryEmbedding) !== count($itemEmbedding)) {
+                Log::warning("Embedding dimension mismatch", [
+                    'query' => count($queryEmbedding),
+                    'item' => count($itemEmbedding),
+                    'item_id' => $item->id,
+                ]);
+                continue;
+            }
+
             $similarity = $this->cosineSimilarity($queryEmbedding, $itemEmbedding);
             $similarities[] = [
                 'item' => $item,
@@ -117,12 +171,10 @@ class EmbeddingService
             ];
         }
 
-        // Сортируем по убыванию схожести
         usort($similarities, function($a, $b) {
             return $b['similarity'] <=> $a['similarity'];
         });
 
-        // Возвращаем топ N результатов
         return array_slice($similarities, 0, $limit);
     }
 
@@ -153,28 +205,25 @@ class EmbeddingService
         $combined = [];
         $seen = [];
 
-        // Добавляем векторные результаты с весом
         foreach ($vectorResults as $result) {
             $id = $result['item']->id;
             if (!isset($seen[$id])) {
                 $combined[] = [
                     'item' => $result['item'],
-                    'score' => $result['similarity'] * 0.7, // Вес векторного поиска
+                    'score' => $result['similarity'] * 0.7,
                 ];
                 $seen[$id] = true;
             }
         }
 
-        // Добавляем результаты полнотекстового поиска
         foreach ($textResults as $item) {
             if (!isset($seen[$item->id])) {
                 $combined[] = [
                     'item' => $item,
-                    'score' => 0.3, // Базовый вес текстового поиска
+                    'score' => 0.3,
                 ];
                 $seen[$item->id] = true;
             } else {
-                // Увеличиваем score если найдено обоими методами
                 foreach ($combined as &$c) {
                     if ($c['item']->id === $item->id) {
                         $c['score'] += 0.3;
@@ -184,12 +233,40 @@ class EmbeddingService
             }
         }
 
-        // Сортируем по общему score
         usort($combined, function($a, $b) {
             return $b['score'] <=> $a['score'];
         });
 
-        // Возвращаем топ N
         return array_slice($combined, 0, $limit);
+    }
+
+    /**
+     * Перегенерация эмбеддингов для всех элементов базы знаний
+     */
+    public function regenerateEmbeddings($knowledgeBase): array
+    {
+        $stats = ['success' => 0, 'failed' => 0, 'skipped' => 0];
+        
+        $items = $knowledgeBase->items()->where('is_active', true)->get();
+        
+        foreach ($items as $item) {
+            try {
+                $text = $item->title . "\n\n" . $item->content;
+                $embedding = $this->generateEmbedding($text);
+                
+                if ($embedding && count($embedding) === 1536) {
+                    $item->update(['embedding' => json_encode($embedding)]);
+                    $stats['success']++;
+                } else {
+                    $stats['failed']++;
+                    Log::warning("Invalid embedding generated for item {$item->id}");
+                }
+            } catch (\Exception $e) {
+                $stats['failed']++;
+                Log::error("Failed to regenerate embedding for item {$item->id}: " . $e->getMessage());
+            }
+        }
+        
+        return $stats;
     }
 }

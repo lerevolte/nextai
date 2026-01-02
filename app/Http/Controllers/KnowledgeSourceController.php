@@ -63,61 +63,72 @@ class KnowledgeSourceController extends Controller
         }
 
         $validated = $request->validate([
-            'type' => 'required|in:notion,url,google_drive,github',
+            'type' => 'required|in:notion,url,google_drive,github,google_docs',
             'name' => 'required|string|max:255',
         ]);
 
         $config = [];
-        $syncSettings = [];
 
         // Валидация специфичная для типа источника
         switch ($validated['type']) {
             case 'notion':
-                $config = $request->validate([
+                $configValidation = $request->validate([
                     'config.api_token' => 'required|string',
                     'config.database_id' => 'required|string',
-                    'config.delete_removed' => 'boolean',
+                    'config.delete_removed' => 'nullable|boolean',
                 ]);
+                $config = $configValidation['config'] ?? [];
+                $config['delete_removed'] = $request->boolean('config.delete_removed');
                 break;
                 
             case 'url':
-                $config = $request->validate([
-                    'config.urls' => 'required|array',
+                $configValidation = $request->validate([
+                    'config.urls' => 'required|array|min:1',
                     'config.urls.*' => 'required|url',
                 ]);
+                $config = $configValidation['config'] ?? [];
                 break;
                 
             case 'google_drive':
-                $config = $request->validate([
+                $configValidation = $request->validate([
                     'config.folder_id' => 'required|string',
                     'config.credentials' => 'required|string',
                 ]);
+                $config = $configValidation['config'] ?? [];
                 break;
                 
             case 'github':
-                $config = $request->validate([
+                $configValidation = $request->validate([
                     'config.repository' => 'required|string',
                     'config.branch' => 'required|string',
                     'config.path' => 'nullable|string',
                     'config.token' => 'nullable|string',
                 ]);
+                $config = $configValidation['config'] ?? [];
+                break;
+
+            case 'google_docs':
+                $config = $this->validateGoogleDocsConfig($request);
                 break;
         }
 
         // Настройки синхронизации
-        $syncSettings = $request->validate([
+        $syncSettingsValidation = $request->validate([
             'sync_settings.interval' => 'required|in:hourly,daily,weekly,monthly,manual',
-            'sync_settings.auto_sync' => 'boolean',
+            'sync_settings.auto_sync' => 'nullable|boolean',
         ]);
+        
+        $syncSettings = $syncSettingsValidation['sync_settings'] ?? [];
+        $syncSettings['auto_sync'] = $request->boolean('sync_settings.auto_sync');
 
         $source = KnowledgeSource::create([
             'knowledge_base_id' => $knowledgeBase->id,
             'type' => $validated['type'],
             'name' => $validated['name'],
-            'config' => $config['config'],
-            'sync_settings' => $syncSettings['sync_settings'],
+            'config' => $config,
+            'sync_settings' => $syncSettings,
             'is_active' => true,
-            'next_sync_at' => $this->calculateNextSyncTime($syncSettings['sync_settings']['interval']),
+            'next_sync_at' => $this->calculateNextSyncTime($syncSettings['interval'] ?? 'daily'),
         ]);
 
         // Запускаем первую синхронизацию
@@ -134,13 +145,131 @@ class KnowledgeSourceController extends Controller
             ->with('success', 'Источник успешно добавлен');
     }
 
+    /**
+     * Валидация конфигурации Google Docs
+     */
+    protected function validateGoogleDocsConfig(Request $request): array
+    {
+        $authType = $request->input('config.auth_type', 'public');
+        $sourceType = $request->input('config.source_type', 'urls');
+
+        $config = [
+            'auth_type' => $authType,
+            'source_type' => $sourceType,
+            'delete_removed' => $request->boolean('config.delete_removed'),
+        ];
+
+        // Валидация авторизации
+        switch ($authType) {
+            case 'public':
+                // Для публичного доступа ничего не нужно
+                break;
+
+            case 'service_account':
+                $request->validate([
+                    'config.service_account_json' => 'required|string',
+                ]);
+                
+                $json = $request->input('config.service_account_json');
+                $decoded = json_decode($json, true);
+                
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \Illuminate\Validation\ValidationException(
+                        validator([], []),
+                        response()->json(['errors' => ['config.service_account_json' => ['Невалидный JSON']]], 422)
+                    );
+                }
+                
+                if (empty($decoded['type']) || $decoded['type'] !== 'service_account') {
+                    throw new \Illuminate\Validation\ValidationException(
+                        validator([], []),
+                        response()->json(['errors' => ['config.service_account_json' => ['Это не ключ Service Account']]], 422)
+                    );
+                }
+                
+                $config['service_account_json'] = $json;
+                break;
+
+            case 'oauth':
+                $request->validate([
+                    'config.access_token' => 'required|string',
+                    'config.refresh_token' => 'nullable|string',
+                ]);
+                $config['access_token'] = $request->input('config.access_token');
+                $config['refresh_token'] = $request->input('config.refresh_token');
+                break;
+
+            default:
+                throw new \InvalidArgumentException('Неизвестный тип авторизации: ' . $authType);
+        }
+
+        // Валидация источника документов
+        switch ($sourceType) {
+            case 'urls':
+                $request->validate([
+                    'config.document_urls' => 'required|array|min:1',
+                    'config.document_urls.*' => 'required|string',
+                ]);
+                
+                $urls = $request->input('config.document_urls', []);
+                $validUrls = [];
+                
+                foreach ($urls as $url) {
+                    $url = trim($url);
+                    if (empty($url)) continue;
+                    
+                    // Проверяем формат URL Google Docs
+                    if (!preg_match('/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/', $url)) {
+                        throw new \Illuminate\Validation\ValidationException(
+                            validator([], []),
+                            response()->json(['errors' => ['config.document_urls' => ["Невалидный URL Google Docs: {$url}"]]], 422)
+                        );
+                    }
+                    
+                    $validUrls[] = $url;
+                }
+                
+                $config['document_urls'] = $validUrls;
+                break;
+
+            case 'documents':
+                $request->validate([
+                    'config.document_ids' => 'required|array|min:1',
+                    'config.document_ids.*' => 'required|string',
+                ]);
+                
+                $ids = array_filter(array_map('trim', $request->input('config.document_ids', [])));
+                $config['document_ids'] = array_values($ids);
+                break;
+
+            case 'folder':
+                // Папка требует авторизацию
+                if ($authType === 'public') {
+                    throw new \Illuminate\Validation\ValidationException(
+                        validator([], []),
+                        response()->json(['errors' => ['config.source_type' => ['Для синхронизации папки требуется Service Account или OAuth авторизация']]], 422)
+                    );
+                }
+                
+                $request->validate([
+                    'config.folder_id' => 'required|string',
+                ]);
+                $config['folder_id'] = trim($request->input('config.folder_id'));
+                break;
+
+            default:
+                throw new \InvalidArgumentException('Неизвестный тип источника: ' . $sourceType);
+        }
+
+        return $config;
+    }
+
     public function sync(Organization $organization, Bot $bot, KnowledgeSource $source)
     {
         if ($source->knowledge_base_id !== $bot->knowledgeBase->id) {
             abort(403);
         }
 
-        // Передаем ID пользователя, который инициировал синхронизацию
         SyncKnowledgeSource::dispatch($source, auth()->id());
 
         return redirect()
@@ -154,7 +283,6 @@ class KnowledgeSourceController extends Controller
             abort(403);
         }
 
-        // Удаляем связанные элементы
         if (request()->boolean('delete_items', false)) {
             $source->items()->delete();
         }
@@ -188,7 +316,7 @@ class KnowledgeSourceController extends Controller
         }
 
         $request->validate([
-            'file' => 'required|file|mimes:pdf,doc,docx,txt,md,html,csv,xls,xlsx|max:20480', // 20MB
+            'file' => 'required|file|mimes:pdf,doc,docx,txt,md,html,csv,xls,xlsx|max:20480',
         ]);
 
         try {
@@ -212,18 +340,13 @@ class KnowledgeSourceController extends Controller
 
     protected function calculateNextSyncTime(string $interval): \Carbon\Carbon
     {
-        switch ($interval) {
-            case 'hourly':
-                return now()->addHour();
-            case 'daily':
-                return now()->addDay();
-            case 'weekly':
-                return now()->addWeek();
-            case 'monthly':
-                return now()->addMonth();
-            default:
-                return now()->addDay();
-        }
+        return match($interval) {
+            'hourly' => now()->addHour(),
+            'daily' => now()->addDay(),
+            'weekly' => now()->addWeek(),
+            'monthly' => now()->addMonth(),
+            default => now()->addDay(),
+        };
     }
 
     public function logs(Organization $organization, Bot $bot, KnowledgeSource $source)

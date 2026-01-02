@@ -35,4 +35,4 @@ Thumbs.db
 /storage/framework/cache/data/*
 docker-compose.override.yml
 .idea/
-.vscode/
+.vscode/database.sql

@@ -20,10 +20,12 @@ class AIService
     ];
 
     protected EmbeddingService $embeddingService;
+    protected KnowledgeSearchService $searchService;
 
-    public function __construct(EmbeddingService $embeddingService)
+    public function __construct(EmbeddingService $embeddingService, KnowledgeSearchService $searchService)
     {
         $this->embeddingService = $embeddingService;
+        $this->searchService = $searchService;
     }
 
     public function generateResponse(Bot $bot, Conversation $conversation, string $message): string
@@ -63,52 +65,13 @@ class AIService
         }
 
         try {
-            // Сначала пробуем полнотекстовый поиск (быстрее и не требует эмбеддингов)
-            $items = $knowledgeBase->items()
-                ->where('is_active', true)
-                ->where(function($q) use ($query) {
-                    $keywords = explode(' ', $query);
-                    foreach ($keywords as $keyword) {
-                        if (strlen($keyword) > 2) {
-                            $q->orWhere('title', 'LIKE', '%' . $keyword . '%')
-                              ->orWhere('content', 'LIKE', '%' . $keyword . '%');
-                        }
-                    }
-                })
-                ->limit(2)
-                ->get();
-
-            if ($items->isEmpty()) {
-                // Если ничего не нашли, берем последние добавленные
-                $items = $knowledgeBase->items()
-                    ->where('is_active', true)
-                    ->orderBy('created_at', 'desc')
-                    ->limit(2)
-                    ->get();
+            // Используем Elasticsearch для поиска
+            if ($this->searchService->isAvailable()) {
+                return $this->getContextFromElasticsearch($knowledgeBase, $query);
             }
 
-            if ($items->isEmpty()) {
-                return '';
-            }
-
-            // Ограничиваем размер контекста для Gemini
-            $context = "Используй эту информацию для ответа:\n\n";
-            $maxContextLength = 2000; // Максимальная длина контекста
-            $currentLength = 0;
-            
-            foreach ($items as $item) {
-                $itemContent = "Тема: " . $item->title . "\n" . 
-                              Str::limit($item->content, 500) . "\n\n";
-                
-                if ($currentLength + strlen($itemContent) <= $maxContextLength) {
-                    $context .= $itemContent;
-                    $currentLength += strlen($itemContent);
-                } else {
-                    break;
-                }
-            }
-            
-            return $context;
+            // Fallback на старый метод если Elasticsearch недоступен
+            return $this->getContextFromDatabase($knowledgeBase, $query);
             
         } catch (\Exception $e) {
             Log::error('Knowledge base search error', [
@@ -118,6 +81,102 @@ class AIService
             
             return '';
         }
+    }
+
+    /**
+     * Получение контекста через Elasticsearch
+     */
+    protected function getContextFromElasticsearch($knowledgeBase, string $query): string
+    {
+        $results = $this->searchService->searchWithThreshold(
+            query: $query,
+            knowledgeBase: $knowledgeBase,
+            minScore: 1.0,  // Минимальный порог релевантности
+            limit: 3        // Количество чанков
+        );
+
+        if (empty($results)) {
+            Log::info('Elasticsearch: no relevant results found', ['query' => $query]);
+            return '';
+        }
+
+        Log::info('Elasticsearch: found relevant chunks', [
+            'query' => $query,
+            'count' => count($results),
+            'top_score' => $results[0]['score'] ?? 0,
+        ]);
+
+        // Формируем контекст
+        $context = "Используй следующую информацию из базы знаний для ответа:\n\n";
+        $maxContextLength = 3000; // Увеличиваем лимит для более полных ответов
+        $currentLength = 0;
+
+        foreach ($results as $index => $result) {
+            $chunkContent = "--- Источник " . ($index + 1) . " (релевантность: " . round($result['score'], 1) . ") ---\n";
+            $chunkContent .= $result['content'] . "\n\n";
+
+            if ($currentLength + strlen($chunkContent) <= $maxContextLength) {
+                $context .= $chunkContent;
+                $currentLength += strlen($chunkContent);
+            } else {
+                break;
+            }
+        }
+
+        $context .= "---\nОтвечай на основе предоставленной информации. Если информации недостаточно, скажи об этом.";
+
+        return $context;
+    }
+
+    /**
+     * Fallback: получение контекста из базы данных
+     */
+    protected function getContextFromDatabase($knowledgeBase, string $query): string
+    {
+        // Сначала пробуем полнотекстовый поиск
+        $items = $knowledgeBase->items()
+            ->where('is_active', true)
+            ->where(function($q) use ($query) {
+                $keywords = explode(' ', $query);
+                foreach ($keywords as $keyword) {
+                    if (strlen($keyword) > 2) {
+                        $q->orWhere('title', 'LIKE', '%' . $keyword . '%')
+                          ->orWhere('content', 'LIKE', '%' . $keyword . '%');
+                    }
+                }
+            })
+            ->limit(2)
+            ->get();
+
+        if ($items->isEmpty()) {
+            $items = $knowledgeBase->items()
+                ->where('is_active', true)
+                ->orderBy('created_at', 'desc')
+                ->limit(2)
+                ->get();
+        }
+
+        if ($items->isEmpty()) {
+            return '';
+        }
+
+        $context = "Используй эту информацию для ответа:\n\n";
+        $maxContextLength = 2000;
+        $currentLength = 0;
+        
+        foreach ($items as $item) {
+            $itemContent = "Тема: " . $item->title . "\n" . 
+                          Str::limit($item->content, 500) . "\n\n";
+            
+            if ($currentLength + strlen($itemContent) <= $maxContextLength) {
+                $context .= $itemContent;
+                $currentLength += strlen($itemContent);
+            } else {
+                break;
+            }
+        }
+        
+        return $context;
     }
 
     protected function prepareMessages(Bot $bot, Conversation $conversation, string $message, string $context): array
@@ -136,7 +195,7 @@ class AIService
         if ($bot->ai_provider === 'gemini') {
             $systemPrompt = Str::limit($systemPrompt, 500);
             if ($context) {
-                $systemPrompt .= "\n\nКонтекст: " . Str::limit($context, 1000);
+                $systemPrompt .= "\n\nКонтекст: " . Str::limit($context, 1500);
             }
             $messages[] = ['role' => 'system', 'content' => $systemPrompt];
         } else {
@@ -194,7 +253,7 @@ class AIService
      */
     public function extractData(string $prompt): string
     {
-        $provider = $this->getProvider('openai'); // или другой провайдер
+        $provider = $this->getProvider('openai');
         
         return $provider->generateResponse(
             model: 'gpt-4o-mini',

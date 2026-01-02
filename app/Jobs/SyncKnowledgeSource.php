@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\KnowledgeSource;
 use App\Models\KnowledgeSyncLog;
 use App\Services\Integrations\NotionService;
+use App\Services\Integrations\GoogleDocsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -49,6 +50,11 @@ class SyncKnowledgeSource implements ShouldQueue
                 case 'notion':
                     $notionService = new NotionService();
                     $stats = $notionService->syncDatabase($this->source, $this->userId);
+                    break;
+
+                case 'google_docs':
+                    $googleDocsService = new GoogleDocsService();
+                    $stats = $googleDocsService->syncDocuments($this->source, $this->userId);
                     break;
                     
                 case 'url':
@@ -196,14 +202,12 @@ class SyncKnowledgeSource implements ShouldQueue
     protected function syncGoogleDrive(): array
     {
         // Заглушка для Google Drive синхронизации
-        // Здесь должна быть интеграция с Google Drive API
         return ['added' => 0, 'updated' => 0, 'deleted' => 0];
     }
 
     protected function syncGitHub(): array
     {
         // Заглушка для GitHub синхронизации
-        // Здесь должна быть интеграция с GitHub API для синхронизации README и документации
         return ['added' => 0, 'updated' => 0, 'deleted' => 0];
     }
 

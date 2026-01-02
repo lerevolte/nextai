@@ -87,4 +87,9 @@ class KnowledgeBase extends Model
     {
         return $this->hasMany(KnowledgeSource::class);
     }
+
+    public function chunks(): HasMany
+    {
+        return $this->hasMany(KnowledgeChunk::class);
+    }
 }

@@ -32,6 +32,32 @@ class KnowledgeSource extends Model
         'next_sync_at' => 'datetime',
     ];
 
+    /**
+     * Типы источников
+     */
+    public const TYPES = [
+        'notion' => [
+            'name' => 'Notion',
+            'icon' => '📝',
+        ],
+        'google_docs' => [
+            'name' => 'Google Docs',
+            'icon' => '📘',
+        ],
+        'url' => [
+            'name' => 'Веб-страницы',
+            'icon' => '🌐',
+        ],
+        'google_drive' => [
+            'name' => 'Google Drive',
+            'icon' => '📁',
+        ],
+        'github' => [
+            'name' => 'GitHub',
+            'icon' => '🐙',
+        ],
+    ];
+
     public function knowledgeBase(): BelongsTo
     {
         return $this->belongsTo(KnowledgeBase::class);
@@ -45,5 +71,38 @@ class KnowledgeSource extends Model
     public function syncLogs(): HasMany
     {
         return $this->hasMany(KnowledgeSyncLog::class);
+    }
+
+    /**
+     * Получить название типа источника
+     */
+    public function getTypeName(): string
+    {
+        return self::TYPES[$this->type]['name'] ?? $this->type;
+    }
+
+    /**
+     * Получить иконку типа источника
+     */
+    public function getTypeIcon(): string
+    {
+        return self::TYPES[$this->type]['icon'] ?? '📊';
+    }
+
+    /**
+     * Проверить, активна ли автосинхронизация
+     */
+    public function isAutoSyncEnabled(): bool
+    {
+        return ($this->sync_settings['auto_sync'] ?? false) 
+            && ($this->sync_settings['interval'] ?? 'manual') !== 'manual';
+    }
+
+    /**
+     * Получить последний лог синхронизации
+     */
+    public function getLastSyncLog(): ?KnowledgeSyncLog
+    {
+        return $this->syncLogs()->latest()->first();
     }
 }

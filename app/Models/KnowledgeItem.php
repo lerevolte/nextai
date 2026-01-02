@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany; // Добавьте этот импорт
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class KnowledgeItem extends Model
 {
@@ -36,6 +36,44 @@ class KnowledgeItem extends Model
     ];
 
     /**
+     * Доступные типы элементов базы знаний
+     */
+    public const TYPES = [
+        'manual' => [
+            'name' => 'Ручной ввод',
+            'icon' => '✏️',
+        ],
+        'url' => [
+            'name' => 'Веб-страница',
+            'icon' => '🔗',
+        ],
+        'file' => [
+            'name' => 'Файл',
+            'icon' => '📄',
+        ],
+        'notion' => [
+            'name' => 'Notion',
+            'icon' => '📝',
+        ],
+        'google_docs' => [
+            'name' => 'Google Docs',
+            'icon' => '📘',
+        ],
+        'google_drive' => [
+            'name' => 'Google Drive',
+            'icon' => '📁',
+        ],
+        'github' => [
+            'name' => 'GitHub',
+            'icon' => '🐙',
+        ],
+        'api' => [
+            'name' => 'API',
+            'icon' => '🔌',
+        ],
+    ];
+
+    /**
      * Relationships
      */
     public function knowledgeBase(): BelongsTo
@@ -48,7 +86,6 @@ class KnowledgeItem extends Model
         return $this->belongsTo(KnowledgeSource::class, 'knowledge_source_id');
     }
 
-    // Исправленный метод versions с правильной типизацией
     public function versions(): HasMany
     {
         return $this->hasMany(KnowledgeItemVersion::class);
@@ -67,33 +104,22 @@ class KnowledgeItem extends Model
         return $query->where('type', $type);
     }
 
+    public function scopeFromSource($query, int $sourceId)
+    {
+        return $query->where('knowledge_source_id', $sourceId);
+    }
+
     /**
      * Methods
      */
     public function getTypeName(): string
     {
-        $types = [
-            'manual' => 'Ручной ввод',
-            'url' => 'Веб-страница',
-            'file' => 'Файл',
-            'notion' => 'Notion',
-            'api' => 'API',
-        ];
-
-        return $types[$this->type] ?? $this->type;
+        return self::TYPES[$this->type]['name'] ?? $this->type;
     }
 
     public function getTypeIcon(): string
     {
-        $icons = [
-            'manual' => '✏️',
-            'url' => '🔗',
-            'file' => '📄',
-            'notion' => '📝',
-            'api' => '🔌',
-        ];
-
-        return $icons[$this->type] ?? '📋';
+        return self::TYPES[$this->type]['icon'] ?? '📋';
     }
 
     public function getExcerpt(int $length = 150): string
@@ -108,11 +134,71 @@ class KnowledgeItem extends Model
 
     public function getCharacterCount(): int
     {
-        return strlen($this->content);
+        return mb_strlen($this->content);
     }
 
     public function updateEmbedding(array $embedding): void
     {
         $this->update(['embedding' => $embedding]);
+    }
+
+    /**
+     * Проверяет, является ли элемент синхронизируемым из внешнего источника
+     */
+    public function isSyncable(): bool
+    {
+        return in_array($this->type, ['notion', 'google_docs', 'google_drive', 'github', 'url']);
+    }
+
+    /**
+     * Проверяет, нужно ли обновить элемент
+     */
+    public function needsSync(): bool
+    {
+        if (!$this->isSyncable() || !$this->source) {
+            return false;
+        }
+
+        $interval = $this->source->sync_settings['interval'] ?? 'daily';
+        
+        if ($interval === 'manual') {
+            return false;
+        }
+
+        if (!$this->last_synced_at) {
+            return true;
+        }
+
+        $nextSync = match($interval) {
+            'hourly' => $this->last_synced_at->addHour(),
+            'daily' => $this->last_synced_at->addDay(),
+            'weekly' => $this->last_synced_at->addWeek(),
+            'monthly' => $this->last_synced_at->addMonth(),
+            default => $this->last_synced_at->addDay(),
+        };
+
+        return now()->gte($nextSync);
+    }
+
+    /**
+     * Получить URL источника для отображения
+     */
+    public function getSourceDisplayUrl(): ?string
+    {
+        if ($this->source_url) {
+            return $this->source_url;
+        }
+
+        // Для Google Docs формируем URL из external_id
+        if ($this->type === 'google_docs' && $this->external_id) {
+            return "https://docs.google.com/document/d/{$this->external_id}/edit";
+        }
+
+        // Для Notion
+        if ($this->type === 'notion' && isset($this->sync_metadata['notion_url'])) {
+            return $this->sync_metadata['notion_url'];
+        }
+
+        return null;
     }
 }

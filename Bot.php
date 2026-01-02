@@ -65,6 +65,21 @@ class Bot extends Model
         return $this->hasOne(KnowledgeBase::class);
     }
 
+    /**
+     * Функции бота
+     */
+    public function functions(): HasMany
+    {
+        return $this->hasMany(BotFunction::class);
+    }
+
+    /**
+     * Намерения (intents) для AI
+     */
+    public function intents(): HasMany
+    {
+        return $this->hasMany(BotIntent::class);
+    }
 
     public function crmIntegrations()
     {
@@ -83,6 +98,15 @@ class Bot extends Model
             ->withTimestamps();
     }
 
+    public function abTests(): HasMany
+    {
+        return $this->hasMany(AbTest::class);
+    }
+
+    public function cachedResponses(): HasMany
+    {
+        return $this->hasMany(CachedResponse::class);
+    }
 
     public function getActiveChannels()
     {
@@ -167,7 +191,31 @@ class Bot extends Model
         return round(($positive / $total) * 100, 2);
     }
 
+    /**
+     * Получить активный A/B тест для бота (если есть)
+     */
+    public function getActiveAbTest(): ?AbTest
+    {
+        return $this->abTests()
+            ->active()
+            ->orderBy('priority', 'desc')
+            ->first();
+    }
 
+    /**
+     * Проверить, есть ли кэшированный ответ
+     */
+    public function getCachedResponse(string $question): ?string
+    {
+        $cached = CachedResponse::findByQuestion($this, $question);
+        
+        if ($cached) {
+            $cached->recordHit();
+            return $cached->response;
+        }
+        
+        return null;
+    }
 
     public function scopeActive($query)
     {
